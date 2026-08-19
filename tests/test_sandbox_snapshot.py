@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -14,6 +15,18 @@ from scripts.sandbox_snapshot import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_dockerfile_exposes_node_modules_from_workspace() -> None:
+    dockerfile = (PROJECT_ROOT / "sandbox" / "Dockerfile").read_text()
+
+    assert "ln -s /opt/pptx/node_modules /workspace/node_modules" in dockerfile
+
+
+def test_sharp_version_supports_bookworm_node() -> None:
+    package = json.loads((PROJECT_ROOT / "sandbox" / "package.json").read_text())
+
+    assert package["dependencies"]["sharp"] == "0.33.5"
 
 
 def test_copies_only_snapshot_assets_and_complete_pptx_skill(
@@ -104,7 +117,7 @@ def test_build_reserves_capacity_for_langsmith_builder_snapshot() -> None:
 
     assert (
         client.create_snapshot_from_dockerfile.call_args.kwargs["fs_capacity_bytes"]
-        == 32 * 1024**3
+        == 8 * 1024**3
     )
 
 
@@ -169,7 +182,7 @@ def test_create_from_image_deletes_failed_snapshot_before_recreating() -> None:
         client.create_snapshot.call_args.kwargs["docker_image"]
         == "ghcr.io/zzbazzzbaz/ppt-deepagent:v1"
     )
-    assert client.create_snapshot.call_args.kwargs["fs_capacity_bytes"] == 32 * 1024**3
+    assert client.create_snapshot.call_args.kwargs["fs_capacity_bytes"] == 8 * 1024**3
 
 
 def test_create_from_image_passes_registry_id_when_provided() -> None:

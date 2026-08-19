@@ -19,7 +19,7 @@ _BUILD_ASSETS = (
     "package-lock.json",
     "requirements.txt",
 )
-_FS_CAPACITY_BYTES = 32 * 1024**3
+_FS_CAPACITY_BYTES = 8 * 1024**3
 _VCPUS = 2
 _MEM_BYTES = 8 * 1024**3
 _BUILD_TIMEOUT_SECONDS = 3600
