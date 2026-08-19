@@ -1,0 +1,11 @@
+.venv/
+.idea/
+.ruff_cache/
+.langgraph_api/
+__pycache__/
+*.pyc
+.DS_Store
+.env
+
+# 对话历史（不纳入版本控制）
+docs/_chat/
