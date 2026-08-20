@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from uuid import UUID
@@ -68,12 +69,20 @@ def _validate_upload_responses(
         raise RuntimeError("Workspace upload failed: " + "; ".join(failures))
 
 
+def _prepare_local_uploads(workspace: ThreadWorkspace) -> list[tuple[str, bytes]]:
+    for directory in (workspace.input, workspace.work, workspace.output):
+        directory.mkdir(parents=True, exist_ok=True)
+
+    uploads = collect_uploads(workspace.input, "/workspace/input")
+    uploads.extend(collect_uploads(workspace.work, "/workspace/work"))
+    return uploads
+
+
 async def initialize_thread_workspace(
     backend: SandboxBackendProtocol,
     workspace: ThreadWorkspace,
 ) -> None:
-    for directory in (workspace.input, workspace.work, workspace.output):
-        directory.mkdir(parents=True, exist_ok=True)
+    uploads = await asyncio.to_thread(_prepare_local_uploads, workspace)
 
     mkdir_result = await backend.aexecute(
         "mkdir -p -- /workspace/input /workspace/work"
@@ -83,8 +92,6 @@ async def initialize_thread_workspace(
             f"Failed to initialize remote workspace: {mkdir_result.output}"
         )
 
-    uploads = collect_uploads(workspace.input, "/workspace/input")
-    uploads.extend(collect_uploads(workspace.work, "/workspace/work"))
     if not uploads:
         return
 

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from blockbuster import blockbuster_ctx
 
 from agent import workspace as workspace_module
 
@@ -51,7 +52,8 @@ async def test_initialization_uploads_input_and_work_without_remote_delete(
         SimpleNamespace(path="/workspace/work/source.js", error=None),
     ]
 
-    await workspace_module.initialize_thread_workspace(backend, workspace)
+    with blockbuster_ctx(scanned_modules=[workspace_module]):
+        await workspace_module.initialize_thread_workspace(backend, workspace)
 
     uploads = dict(backend.aupload_files.await_args.args[0])
     assert uploads["/workspace/input/nested/brief.txt"] == b"brief"

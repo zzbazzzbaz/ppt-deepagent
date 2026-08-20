@@ -100,27 +100,36 @@ async def _wait_for_trace_runs(
     started_at: datetime,
 ) -> tuple[str, list[Any]]:
     project = await client.aread_project(project_name=project_name)
-    for _ in range(20):
+    for _ in range(120):
         roots: list[Any] = []
         async for run in client.runs.query(
             project_ids=[str(project.id)],
             is_root=True,
             min_start_time=started_at,
             page_size=100,
+            selects=["TRACE_ID", "START_TIME", "EXTRA"],
         ):
             if _metadata(run).get("smoke_id") == smoke_id:
                 roots.append(run)
-        if len(roots) == 1:
-            trace_id = str(roots[0].trace_id)
+        if roots:
+            generation_root = max(roots, key=lambda run: run.start_time)
+            trace_id = str(generation_root.trace_id)
             runs = [
                 run
                 async for run in client.runs.query(
-                    project_ids=[str(project.id)], trace_id=trace_id, page_size=100
+                    project_ids=[str(project.id)],
+                    trace_id=trace_id,
+                    page_size=100,
+                    selects=["NAME", "EXTRA"],
                 )
             ]
-            return trace_id, runs
+            run_names = {str(getattr(run, "name", "")) for run in runs}
+            if {"view", "save_output"}.issubset(run_names):
+                return trace_id, runs
         await asyncio.sleep(1)
-    raise RuntimeError(f"LangSmith trace not found for smoke_id={smoke_id}")
+    raise RuntimeError(
+        f"Completed LangSmith generation trace not found for smoke_id={smoke_id}"
+    )
 
 
 def _assert_trace_components(

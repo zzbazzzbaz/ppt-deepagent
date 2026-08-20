@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import shlex
 import shutil
 import tempfile
@@ -32,7 +33,12 @@ async def _collect_remote_files(
     for entry in result.matches or []:
         if entry.get("is_dir", False):
             continue
-        remote_path = PurePosixPath(entry["path"])
+        listed_path = PurePosixPath(entry["path"])
+        remote_path = (
+            listed_path
+            if listed_path.is_absolute()
+            else _REMOTE_WORK.joinpath(listed_path)
+        )
         try:
             relative_path = remote_path.relative_to(_REMOTE_WORK)
         except ValueError as exc:
@@ -168,6 +174,29 @@ def _commit_staging_tree(
         shutil.rmtree(staging_root, ignore_errors=True)
 
 
+def _save_downloads_locally(
+    workspace: ThreadWorkspace,
+    files: list[tuple[str, Path]],
+    responses: list[FileDownloadResponse],
+    timestamp: datetime,
+) -> Path:
+    output_path = _next_output_path(workspace.output, timestamp)
+    staging_root, staged_work, staged_output = _prepare_staging_tree(
+        workspace,
+        files,
+        responses,
+        output_path,
+    )
+    _commit_staging_tree(
+        workspace,
+        staging_root,
+        staged_work,
+        staged_output,
+        output_path,
+    )
+    return output_path
+
+
 def create_save_output_tool(
     backend: SandboxBackendProtocol,
     workspace: ThreadWorkspace,
@@ -200,20 +229,13 @@ def create_save_output_tool(
         responses = await backend.adownload_files(remote_paths)
         _validate_downloads(remote_paths, responses)
 
-        output_path = _next_output_path(workspace.output, now())
-        staging_root, staged_work, staged_output = _prepare_staging_tree(
-            workspace,
-            files,
-            responses,
-            output_path,
-        )
         try:
-            _commit_staging_tree(
+            output_path = await asyncio.to_thread(
+                _save_downloads_locally,
                 workspace,
-                staging_root,
-                staged_work,
-                staged_output,
-                output_path,
+                files,
+                responses,
+                now(),
             )
         except Exception as exc:
             raise ToolException(f"Failed to save local output: {exc}") from exc

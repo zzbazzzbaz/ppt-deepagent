@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from blockbuster import blockbuster_ctx
 from deepagents.backends.protocol import (
     FileDownloadResponse,
     GlobResult,
@@ -13,6 +14,7 @@ from deepagents.backends.protocol import (
 )
 from langchain_core.messages import ToolMessage
 
+from agent.tools import output as output_module
 from agent.tools.output import create_save_output_tool
 from agent.workspace import ThreadWorkspace
 
@@ -100,14 +102,14 @@ async def test_saves_complete_work_tree_and_preserves_nested_pptx(
     """Catches saving only a deck while discarding source and nested presentation files."""
     backend = FakeBackend(
         [
-            {"path": "/workspace/work/source.js", "is_dir": False, "size": 6},
+            {"path": "source.js", "is_dir": False, "size": 6},
             {
-                "path": "/workspace/work/final/deck.pptx",
+                "path": "final/deck.pptx",
                 "is_dir": False,
                 "size": 10,
             },
             {
-                "path": "/workspace/work/archive/deck.pptx",
+                "path": "archive/deck.pptx",
                 "is_dir": False,
                 "size": 12,
             },
@@ -133,7 +135,8 @@ async def test_saves_complete_work_tree_and_preserves_nested_pptx(
         now=lambda: datetime(2026, 8, 19, 12, 34, 56),
     )
 
-    result = await tool.ainvoke({})
+    with blockbuster_ctx(scanned_modules=[output_module]):
+        result = await tool.ainvoke({})
 
     assert "20260819-123456" in result
     assert (workspace.work / "source.js").read_bytes() == b"source"
