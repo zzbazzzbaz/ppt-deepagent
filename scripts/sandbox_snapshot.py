@@ -267,13 +267,35 @@ def sync_snapshot_from_image(
         client.delete_snapshot(candidate.id)
         raise
 
+    old_image = existing.docker_image if existing is not None else None
     if existing is not None:
-        raise NotImplementedError("Latest cutover is completed in Task 4")
+        client.delete_snapshot(existing.id)
 
-    latest = create_snapshot_from_image(client, latest_name, docker_image)
-    verify_snapshot(client, latest_name)
+    try:
+        latest = create_snapshot_from_image(client, latest_name, docker_image)
+        verify_snapshot(client, latest_name)
+    except Exception as release_error:
+        failed_latest = _find_snapshot(client, latest_name)
+        if failed_latest is not None:
+            client.delete_snapshot(failed_latest.id)
+        if old_image is None:
+            release_error.add_note(f"Validated candidate retained: {candidate.name}")
+            raise
+        try:
+            create_snapshot_from_image(client, latest_name, old_image)
+            verify_snapshot(client, latest_name)
+        except Exception as rollback_error:
+            raise RuntimeError(
+                f"Snapshot release failed: {release_error}; "
+                f"rollback failed: {rollback_error}; "
+                f"candidate retained: {candidate.name}"
+            ) from rollback_error
+        client.delete_snapshot(candidate.id)
+        raise
     client.delete_snapshot(candidate.id)
-    return SnapshotSyncResult("created", latest)
+    return SnapshotSyncResult(
+        "updated" if existing is not None else "created", latest
+    )
 
 
 def main() -> None:

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
+from langsmith.sandbox import SandboxClientError
 
 from scripts.sandbox_snapshot import (
     SnapshotSyncResult,
@@ -106,8 +107,6 @@ def test_build_deletes_failed_snapshot_with_same_name_before_rebuilding() -> Non
 
 def test_build_retries_transient_upload_failure() -> None:
     """Catches one-off LangSmith dataplane errors aborting an otherwise valid build."""
-    from langsmith.sandbox import SandboxClientError
-
     client = Mock()
     client.list_snapshots.return_value = []
     client.create_snapshot_from_dockerfile.side_effect = [
@@ -319,3 +318,221 @@ def test_sync_creates_latest_when_missing() -> None:
         "delete_snapshot",
     ]
     client.delete_snapshot.assert_called_once_with("candidate-id")
+
+
+_LATEST_NAME = "ppt-deepagent-sandbox-latest"
+_OLD_IMAGE = "ghcr.io/zzbazzzbaz/ppt-deepagent:ppt-deepagent-sandbox-20260819-010203"
+_NEW_IMAGE = "ghcr.io/zzbazzzbaz/ppt-deepagent:ppt-deepagent-sandbox-20260820-010203"
+
+
+def _old_latest_snapshot() -> SimpleNamespace:
+    return SimpleNamespace(
+        id="old-latest-id",
+        name=_LATEST_NAME,
+        status="ready",
+        image_digest="sha256:old",
+        docker_image=_OLD_IMAGE,
+    )
+
+
+def _make_stateful_sync_client(
+    snapshots: list[SimpleNamespace],
+    *,
+    fail_creates: list[str] | None = None,
+) -> tuple[Mock, list[str], list[SimpleNamespace]]:
+    """Simulates LangSmith snapshot state to assert sync ordering and cleanup."""
+    state = list(snapshots)
+    events: list[str] = []
+    pending_failures = list(fail_creates or [])
+    client = Mock()
+
+    def list_snapshots(name_contains: str = "") -> list[SimpleNamespace]:
+        return [snapshot for snapshot in state if name_contains in snapshot.name]
+
+    def create_snapshot(name: str, **kwargs: object) -> SimpleNamespace:
+        if pending_failures and pending_failures[0] == name:
+            pending_failures.pop(0)
+            events.append(f"create-failed:{name}")
+            raise SandboxClientError(f"create failed for {name}")
+        created = SimpleNamespace(
+            id=f"{name}-id",
+            name=name,
+            status="ready",
+            image_digest="sha256:new",
+            docker_image=kwargs["docker_image"],
+        )
+        state.append(created)
+        events.append(f"create:{name}")
+        return created
+
+    def delete_snapshot(snapshot_id: str) -> None:
+        state[:] = [snapshot for snapshot in state if snapshot.id != snapshot_id]
+        events.append(f"delete:{snapshot_id}")
+
+    client.list_snapshots.side_effect = list_snapshots
+    client.create_snapshot.side_effect = create_snapshot
+    client.delete_snapshot.side_effect = delete_snapshot
+    return client, events, state
+
+
+def test_sync_replaces_latest_after_candidate_verification() -> None:
+    """Catches replacing a known-good latest before the candidate is validated."""
+    client, events, state = _make_stateful_sync_client([_old_latest_snapshot()])
+
+    def record_verify(client_arg: Mock, name: str) -> None:
+        events.append(f"verify:{name}")
+
+    with patch("scripts.sandbox_snapshot.verify_snapshot", side_effect=record_verify):
+        result = sync_snapshot_from_image(
+            client,
+            latest_name=_LATEST_NAME,
+            candidate_name="candidate",
+            docker_image=_NEW_IMAGE,
+            image_digest="sha256:new",
+        )
+
+    assert events == [
+        "create:candidate",
+        "verify:candidate",
+        "delete:old-latest-id",
+        f"create:{_LATEST_NAME}",
+        f"verify:{_LATEST_NAME}",
+        "delete:candidate-id",
+    ]
+    assert result.action == "updated"
+    assert result.snapshot.id == f"{_LATEST_NAME}-id"
+    assert [(snapshot.id, snapshot.docker_image) for snapshot in state] == [
+        (f"{_LATEST_NAME}-id", _NEW_IMAGE)
+    ]
+
+
+def test_sync_candidate_failure_keeps_old_latest() -> None:
+    """Catches candidate verification failures deleting the known-good latest."""
+    client, events, state = _make_stateful_sync_client([_old_latest_snapshot()])
+
+    def fail_candidate(client_arg: Mock, name: str) -> None:
+        if name == "candidate":
+            raise RuntimeError("candidate verification failed")
+
+    with patch("scripts.sandbox_snapshot.verify_snapshot", side_effect=fail_candidate):
+        with pytest.raises(RuntimeError, match="candidate verification failed"):
+            sync_snapshot_from_image(
+                client,
+                latest_name=_LATEST_NAME,
+                candidate_name="candidate",
+                docker_image=_NEW_IMAGE,
+                image_digest="sha256:new",
+            )
+
+    assert events == ["create:candidate", "delete:candidate-id"]
+    assert [(snapshot.id, snapshot.docker_image) for snapshot in state] == [
+        ("old-latest-id", _OLD_IMAGE)
+    ]
+
+
+def test_sync_restores_old_latest_when_release_fails() -> None:
+    """Catches a broken release permanently removing the known-good latest."""
+    client, events, state = _make_stateful_sync_client(
+        [_old_latest_snapshot()], fail_creates=[_LATEST_NAME]
+    )
+
+    def record_verify(client_arg: Mock, name: str) -> None:
+        events.append(f"verify:{name}")
+
+    with patch("scripts.sandbox_snapshot.verify_snapshot", side_effect=record_verify):
+        with pytest.raises(SandboxClientError, match="create failed"):
+            sync_snapshot_from_image(
+                client,
+                latest_name=_LATEST_NAME,
+                candidate_name="candidate",
+                docker_image=_NEW_IMAGE,
+                image_digest="sha256:new",
+            )
+
+    assert events == [
+        "create:candidate",
+        "verify:candidate",
+        "delete:old-latest-id",
+        f"create-failed:{_LATEST_NAME}",
+        f"create:{_LATEST_NAME}",
+        f"verify:{_LATEST_NAME}",
+        "delete:candidate-id",
+    ]
+    assert [(snapshot.id, snapshot.docker_image) for snapshot in state] == [
+        (f"{_LATEST_NAME}-id", _OLD_IMAGE)
+    ]
+
+
+def test_sync_deletes_unverified_latest_before_rollback() -> None:
+    """Catches a created-but-unverified latest leaking alongside the rollback."""
+    client, events, state = _make_stateful_sync_client([_old_latest_snapshot()])
+    latest_verifies = 0
+
+    def fail_first_latest_verify(client_arg: Mock, name: str) -> None:
+        nonlocal latest_verifies
+        if name == _LATEST_NAME:
+            latest_verifies += 1
+            if latest_verifies == 1:
+                raise RuntimeError("latest verification failed")
+        events.append(f"verify:{name}")
+
+    with patch(
+        "scripts.sandbox_snapshot.verify_snapshot", side_effect=fail_first_latest_verify
+    ):
+        with pytest.raises(RuntimeError, match="latest verification failed"):
+            sync_snapshot_from_image(
+                client,
+                latest_name=_LATEST_NAME,
+                candidate_name="candidate",
+                docker_image=_NEW_IMAGE,
+                image_digest="sha256:new",
+            )
+
+    assert events == [
+        "create:candidate",
+        "verify:candidate",
+        "delete:old-latest-id",
+        f"create:{_LATEST_NAME}",
+        f"delete:{_LATEST_NAME}-id",
+        f"create:{_LATEST_NAME}",
+        f"verify:{_LATEST_NAME}",
+        "delete:candidate-id",
+    ]
+    assert [(snapshot.id, snapshot.docker_image) for snapshot in state] == [
+        (f"{_LATEST_NAME}-id", _OLD_IMAGE)
+    ]
+
+
+def test_sync_rollback_failure_retains_candidate() -> None:
+    """Catches losing the only validated artifact when rollback also fails."""
+    client, events, state = _make_stateful_sync_client(
+        [_old_latest_snapshot()], fail_creates=[_LATEST_NAME, _LATEST_NAME]
+    )
+
+    def record_verify(client_arg: Mock, name: str) -> None:
+        events.append(f"verify:{name}")
+
+    with patch("scripts.sandbox_snapshot.verify_snapshot", side_effect=record_verify):
+        with pytest.raises(
+            RuntimeError,
+            match=(
+                "Snapshot release failed.*rollback failed.*"
+                "candidate retained: candidate"
+            ),
+        ):
+            sync_snapshot_from_image(
+                client,
+                latest_name=_LATEST_NAME,
+                candidate_name="candidate",
+                docker_image=_NEW_IMAGE,
+                image_digest="sha256:new",
+            )
+
+    assert events == [
+        "create:candidate",
+        "verify:candidate",
+        "delete:old-latest-id",
+        f"create-failed:{_LATEST_NAME}",
+        f"create-failed:{_LATEST_NAME}",
+    ]
+    assert [snapshot.id for snapshot in state] == ["candidate-id"]
