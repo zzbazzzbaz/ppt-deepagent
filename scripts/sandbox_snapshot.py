@@ -19,9 +19,10 @@ _BUILD_ASSETS = (
     "package-lock.json",
     "requirements.txt",
 )
-_FS_CAPACITY_BYTES = 8 * 1024**3
+_FS_CAPACITY_BYTES = 2 * 1024**3
 _VCPUS = 2
 _MEM_BYTES = 8 * 1024**3
+_SANDBOX_MEM_BYTES = 2 * 1024**3
 _BUILD_TIMEOUT_SECONDS = 3600
 _BUILD_ATTEMPTS = 3
 _RETRY_DELAY_SECONDS = 30
@@ -111,6 +112,7 @@ def verify_snapshot(client: SandboxClient, name: str) -> None:
         snapshot_id=snapshot.id,
         name=sandbox_name,
         wait_for_ready=True,
+        mem_bytes=_SANDBOX_MEM_BYTES,
     )
     backend = LangSmithSandbox(sandbox=sandbox)
     try:

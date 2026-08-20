@@ -42,6 +42,7 @@ def _get_or_create_thread_sandbox(thread_id: str) -> Sandbox:
                 name=name,
                 idle_ttl_seconds=sandbox_settings.idle_ttl_seconds,
                 delete_after_stop_seconds=sandbox_settings.delete_after_stop_seconds,
+                mem_bytes=sandbox_settings.mem_bytes,
             )
         except SandboxClientError as creation_error:
             try:

@@ -47,6 +47,11 @@ class SandboxSettings(BaseSettings):
         pattern=r"^[a-z0-9][a-z0-9-]*$",
     )
     snapshot_name: str = Field(min_length=1)
+    mem_bytes: int = Field(
+        default=2 * 1024**3,
+        ge=2 * 1024**3,
+        le=2 * 1024**3,
+    )
     idle_ttl_seconds: int = Field(ge=0, multiple_of=60)
     delete_after_stop_seconds: int = Field(ge=0, multiple_of=60)
 

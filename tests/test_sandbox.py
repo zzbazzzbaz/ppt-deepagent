@@ -22,6 +22,7 @@ _TEST_ENV = {
     "QWEN_MODEL_PROVIDER": "openai",
     "SANDBOX_DELETE_AFTER_STOP_SECONDS": "60",
     "SANDBOX_IDLE_TTL_SECONDS": "60",
+    "SANDBOX_MEM_BYTES": str(2 * 1024**3),
     "SANDBOX_NAME_PREFIX": "test-sandbox",
     "SANDBOX_SNAPSHOT_NAME": "ppt-v1",
 }
@@ -55,6 +56,7 @@ def sandbox_settings_stub() -> None:
             snapshot_name="ppt-v1",
             idle_ttl_seconds=60,
             delete_after_stop_seconds=60,
+            mem_bytes=2 * 1024**3,
         ),
     )
     settings_patch.start()
@@ -82,6 +84,7 @@ def test_creates_thread_sandbox_from_configured_snapshot(client: Mock) -> None:
         name=sandbox_module.sandbox_name_for_thread(THREAD_ID),
         idle_ttl_seconds=60,
         delete_after_stop_seconds=60,
+        mem_bytes=2 * 1024**3,
     )
 
 

@@ -130,7 +130,7 @@ def test_build_reserves_capacity_for_langsmith_builder_snapshot() -> None:
 
     assert (
         client.create_snapshot_from_dockerfile.call_args.kwargs["fs_capacity_bytes"]
-        == 8 * 1024**3
+        == 2 * 1024**3
     )
 
 
@@ -155,6 +155,12 @@ def test_verify_deletes_temporary_sandbox_when_dependency_check_fails() -> None:
         with pytest.raises(RuntimeError, match="missing dependency"):
             verify_snapshot(client, "ppt-v1")
 
+    client.create_sandbox.assert_called_once_with(
+        snapshot_id="snapshot-id",
+        name=client.create_sandbox.call_args.kwargs["name"],
+        wait_for_ready=True,
+        mem_bytes=2 * 1024**3,
+    )
     client.delete_sandbox.assert_called_once_with(
         client.create_sandbox.return_value.name
     )
@@ -195,7 +201,7 @@ def test_create_from_image_deletes_failed_snapshot_before_recreating() -> None:
         client.create_snapshot.call_args.kwargs["docker_image"]
         == "ghcr.io/zzbazzzbaz/ppt-deepagent:v1"
     )
-    assert client.create_snapshot.call_args.kwargs["fs_capacity_bytes"] == 8 * 1024**3
+    assert client.create_snapshot.call_args.kwargs["fs_capacity_bytes"] == 2 * 1024**3
 
 
 def test_create_from_image_passes_registry_id_when_provided() -> None:
