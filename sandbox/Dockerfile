@@ -1,3 +1,5 @@
+FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS node-runtime
+
 FROM python:3.13-slim-bookworm@sha256:00faa2debb87529f9f0764e9491d8ba400a3678976616c3bd7cb193745ac20d1
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -16,12 +18,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libreoffice-common \
     libreoffice-impress \
-    nodejs \
-    npm \
     poppler-utils \
     unzip \
     zip \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
 COPY --from=ghcr.io/astral-sh/uv:0.9.20 /uv /uvx /usr/local/bin/
 COPY requirements.txt /tmp/pptx-requirements.txt

@@ -17,16 +17,29 @@ from scripts.sandbox_snapshot import (
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_dockerfile_exposes_node_modules_from_workspace() -> None:
+def test_dockerfile_uses_pinned_node_22_runtime() -> None:
     dockerfile = (PROJECT_ROOT / "sandbox" / "Dockerfile").read_text()
 
+    assert (
+        "FROM node:22-bookworm-slim@sha256:"
+        "d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 "
+        "AS node-runtime"
+    ) in dockerfile
+    assert "COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node" in dockerfile
+    assert "COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules" in dockerfile
+    assert "\n    nodejs \\" not in dockerfile
+    assert "\n    npm \\" not in dockerfile
+    assert "npm ci --omit=dev --ignore-scripts" in dockerfile
     assert "ln -s /opt/pptx/node_modules /workspace/node_modules" in dockerfile
 
 
-def test_sharp_version_supports_bookworm_node() -> None:
+def test_package_and_lock_pin_node_22_compatible_sharp() -> None:
     package = json.loads((PROJECT_ROOT / "sandbox" / "package.json").read_text())
+    lock = json.loads((PROJECT_ROOT / "sandbox" / "package-lock.json").read_text())
 
-    assert package["dependencies"]["sharp"] == "0.33.5"
+    assert package["dependencies"]["sharp"] == "0.35.3"
+    assert lock["packages"][""]["dependencies"]["sharp"] == "0.35.3"
+    assert lock["packages"]["node_modules/sharp"]["version"] == "0.35.3"
 
 
 def test_copies_only_snapshot_assets_and_complete_pptx_skill(
