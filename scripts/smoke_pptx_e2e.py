@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
+import tempfile
+import urllib.request
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from uuid import uuid4
 
+import boto3
 import langsmith as ls
+from botocore.config import Config
 from langgraph_sdk import get_client
 from langgraph_sdk.schema import Command
 from langsmith.sandbox import ResourceNotFoundError, SandboxClient
@@ -16,9 +21,6 @@ from langsmith.sandbox import ResourceNotFoundError, SandboxClient
 AGENT_SERVER_URL = os.getenv("AGENT_SERVER_URL", "http://127.0.0.1:2024")
 ASSISTANT_ID = "ppt_agent"
 _REQUIRED_TEXT = "可编辑演示"
-
-if TYPE_CHECKING:
-    from agent.workspace import ThreadWorkspace
 
 
 def _tool_calls(messages: list[dict[str, Any]], name: str) -> list[dict[str, Any]]:
@@ -72,19 +74,28 @@ def _validate_editable_pptx(path: Path, required_text: str) -> None:
         raise RuntimeError(f"PPTX is not editable: {path}")
 
 
-def _latest_output(workspace: ThreadWorkspace) -> Path:
-    candidates = [path for path in workspace.output.iterdir() if path.is_dir()]
-    if not candidates:
-        raise RuntimeError(f"No timestamped output directory found: {workspace.output}")
-    return max(candidates, key=lambda path: path.name)
-
-
 def _assert_successful_tool_message(messages: list[dict[str, Any]], name: str) -> None:
     matching = [message for message in messages if message.get("name") == name]
     if not matching:
         raise RuntimeError(f"No {name} ToolMessage found")
     if any(message.get("status") == "error" for message in matching):
         raise RuntimeError(f"{name} ToolMessage reported an error: {matching!r}")
+
+
+def _save_output_content(messages: list[dict[str, Any]]) -> str:
+    matching = [message for message in messages if message.get("name") == "save_output"]
+    if not matching:
+        raise RuntimeError("No save_output ToolMessage found")
+    content = matching[-1].get("content", "")
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                parts.append(str(block.get("text", "")))
+            else:
+                parts.append(str(block))
+        content = "".join(parts)
+    return str(content)
 
 
 def _metadata(run: Any) -> dict[str, Any]:
@@ -149,26 +160,90 @@ def _assert_trace_components(
         raise RuntimeError("Trace does not contain the configured Qwen model")
 
 
-def _prepare_local_workspace(workspace: ThreadWorkspace) -> None:
-    (workspace.input / "nested").mkdir(parents=True, exist_ok=True)
-    workspace.work.mkdir(parents=True, exist_ok=True)
-    (workspace.input / "nested" / "brief.txt").write_text("固定输入素材")
-    (workspace.work / "local-only.txt").write_text("本机工作目录标记")
-
-
-async def _upload_remote_sentinel(backend: Any) -> None:
-    responses = await backend.aupload_files(
-        [("/workspace/work/remote-only.txt", "远程工作目录标记".encode())]
+def _minio_client(minio_settings: Any) -> Any:
+    access_key = os.getenv("MINIO_ACCESS_KEY")
+    secret_key = os.getenv("MINIO_SECRET_KEY")
+    if not access_key or not secret_key:
+        raise RuntimeError("MINIO_ACCESS_KEY and MINIO_SECRET_KEY must be set")
+    return boto3.client(
+        "s3",
+        endpoint_url=minio_settings.endpoint_url,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name=minio_settings.region,
+        config=Config(
+            s3={"addressing_style": "path" if minio_settings.path_style else "virtual"}
+        ),
     )
-    if len(responses) != 1 or responses[0].error is not None:
-        error = responses[0].error if responses else "missing upload response"
-        raise RuntimeError(f"Failed to upload remote sentinel: {error}")
+
+
+def _list_keys(s3: Any, bucket: str, prefix: str) -> list[str]:
+    keys: list[str] = []
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            keys.append(obj["Key"])
+    return keys
+
+
+def _seed_input(s3: Any, bucket: str, thread_id: str) -> None:
+    uploads = {
+        f"threads/{thread_id}/input/nested/brief.txt": "固定输入素材".encode(),
+    }
+    for key, body in uploads.items():
+        s3.put_object(Bucket=bucket, Key=key, Body=body)
+
+
+def _assert_minio_artifacts(
+    s3: Any, bucket: str, thread_id: str, required_text: str
+) -> None:
+    work_prefix = f"threads/{thread_id}/work/"
+    work_keys = _list_keys(s3, bucket, work_prefix)
+    if not any(key.endswith(".js") for key in work_keys):
+        raise RuntimeError("MinIO work prefix is missing generation source")
+    if not any(key.endswith(".jpg") for key in work_keys):
+        raise RuntimeError("MinIO work prefix is missing rendered JPEG files")
+
+    output_prefix = f"threads/{thread_id}/output/"
+    output_pptx = [
+        key for key in _list_keys(s3, bucket, output_prefix) if key.endswith(".pptx")
+    ]
+    if not output_pptx:
+        raise RuntimeError("MinIO output prefix is missing published PPTX files")
+    output_ids = sorted(
+        {key[len(output_prefix):].split("/", 1)[0] for key in output_pptx}
+    )
+    latest_id = output_ids[-1]
+    latest_pptx = [
+        key
+        for key in output_pptx
+        if key[len(output_prefix):].startswith(f"{latest_id}/")
+    ]
+    latest_key = latest_pptx[-1]
+    body = s3.get_object(Bucket=bucket, Key=latest_key)["Body"].read()
+    with tempfile.TemporaryDirectory() as temp:
+        path = Path(temp) / "latest.pptx"
+        path.write_bytes(body)
+        _validate_editable_pptx(path, required_text)
+
+
+def _download_and_validate(url: str, required_text: str) -> None:
+    with urllib.request.urlopen(url, timeout=30) as response:
+        data = response.read()
+    with tempfile.TemporaryDirectory() as temp:
+        path = Path(temp) / "downloaded.pptx"
+        path.write_bytes(data)
+        _validate_editable_pptx(path, required_text)
 
 
 async def _run_smoke() -> None:
     from agent.sandbox import get_thread_sandbox_backend, sandbox_name_for_thread
-    from agent.settings import deepseek_settings, langsmith_settings, qwen_settings
-    from agent.workspace import thread_workspace
+    from agent.settings import (
+        deepseek_settings,
+        langsmith_settings,
+        minio_settings,
+        qwen_settings,
+    )
 
     if not langsmith_settings.tracing:
         raise RuntimeError("LANGSMITH_TRACING must be true")
@@ -176,9 +251,9 @@ async def _run_smoke() -> None:
     agent_client = get_client(url=AGENT_SERVER_URL)
     trace_client = ls.Client(api_key=langsmith_settings.api_key)
     sandbox_client = SandboxClient(api_key=langsmith_settings.api_key)
+    s3 = _minio_client(minio_settings)
     thread = await agent_client.threads.create()
     thread_id = thread["thread_id"]
-    workspace = thread_workspace(thread_id)
     sandbox_name = sandbox_name_for_thread(thread_id)
     smoke_id = f"pptx-e2e-{uuid4()}"
     started_at = datetime.now(UTC)
@@ -186,9 +261,8 @@ async def _run_smoke() -> None:
     cleanup_errors: list[Exception] = []
 
     try:
-        _prepare_local_workspace(workspace)
-        backend = await asyncio.to_thread(get_thread_sandbox_backend, thread_id)
-        await _upload_remote_sentinel(backend)
+        _seed_input(s3, minio_settings.bucket, thread_id)
+        await asyncio.to_thread(get_thread_sandbox_backend, thread_id)
         interrupted = await agent_client.runs.wait(
             thread_id,
             ASSISTANT_ID,
@@ -225,22 +299,13 @@ async def _run_smoke() -> None:
             raise RuntimeError(f"Expected 1-3 view calls after approval, got {len(view_calls)}")
         _assert_successful_tool_message(messages, "save_output")
 
-        for required_name in ("local-only.txt", "remote-only.txt"):
-            if not (workspace.work / required_name).is_file():
-                raise RuntimeError(f"Saved work directory is missing {required_name}")
-        if not list(workspace.work.rglob("*.js")):
-            raise RuntimeError("Saved work directory is missing generation source")
-        if not list(workspace.work.rglob("*.jpg")):
-            raise RuntimeError("Saved work directory is missing rendered JPEG files")
-        saved_pptx = sorted(workspace.work.rglob("*.pptx"))
-        if not saved_pptx:
-            raise RuntimeError("Saved work directory is missing PPTX files")
-        output = _latest_output(workspace)
-        output_pptx = sorted(output.rglob("*.pptx"))
-        if not output_pptx:
-            raise RuntimeError(f"Timestamped output is missing PPTX files: {output}")
-        for path in output_pptx:
-            _validate_editable_pptx(path, required_text=_REQUIRED_TEXT)
+        _assert_minio_artifacts(s3, minio_settings.bucket, thread_id, _REQUIRED_TEXT)
+        save_output_content = _save_output_content(messages)
+        urls = re.findall(r"https://\S+?\.pptx", save_output_content)
+        if not urls:
+            raise RuntimeError("save_output did not return any public PPTX URLs")
+        for url in urls:
+            _download_and_validate(url, required_text=_REQUIRED_TEXT)
 
         trace_id, runs = await _wait_for_trace_runs(
             trace_client,
@@ -252,8 +317,9 @@ async def _run_smoke() -> None:
         print(f"PPTX E2E smoke passed for thread {thread_id}")
         print(f"Sandbox: {sandbox_name}")
         print(f"LangSmith trace: {trace_id}")
-        print(f"Work directory: {workspace.work}")
-        print(f"Output directory: {output}")
+        print(f"MinIO output prefix: threads/{thread_id}/output/")
+        for url in urls:
+            print(f"Public URL: {url}")
     except Exception as exc:
         primary_error = exc
     finally:
@@ -274,8 +340,7 @@ async def _run_smoke() -> None:
         for cleanup_error in cleanup_errors:
             primary_error.add_note(f"Cleanup also failed: {cleanup_error}")
         primary_error.add_note(
-            f"thread_id={thread_id}; sandbox={sandbox_name}; smoke_id={smoke_id}; "
-            f"workspace={workspace.root}"
+            f"thread_id={thread_id}; sandbox={sandbox_name}; smoke_id={smoke_id}"
         )
         raise primary_error
     if cleanup_errors:

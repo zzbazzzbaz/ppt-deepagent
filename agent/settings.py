@@ -38,6 +38,20 @@ class LangsmithSettings(BaseSettings):
     project: str
 
 
+class MinioSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env", env_prefix="MINIO_", extra="ignore"
+    )
+
+    endpoint_url: str
+    bucket: str
+    region: str = "us-east-1"
+    path_style: bool = True
+    public_base_url: str
+    access_key_secret: str = "PPT_MINIO_ACCESS_KEY"
+    secret_key_secret: str = "PPT_MINIO_SECRET_KEY"
+
+
 class SandboxSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env", env_prefix="SANDBOX_", extra="ignore"
@@ -60,3 +74,4 @@ deepseek_settings = DeepSeekSettings()
 qwen_settings = QwenSettings()
 langsmith_settings = LangsmithSettings()
 sandbox_settings = SandboxSettings()
+minio_settings = MinioSettings()

@@ -39,11 +39,7 @@ RUN npm ci --omit=dev --ignore-scripts \
     && npm cache clean --force \
     && rm -rf /tmp/pptx-requirements.txt /root/.npm
 
-COPY pptx /skills/pptx
-RUN test -f /skills/pptx/SKILL.md \
-    && test -f /skills/pptx/LICENSE.txt \
-    && chmod -R a+rX /skills/pptx \
-    && mkdir -p /workspace/input /workspace/work \
+RUN mkdir -p /workspace/input /workspace/work \
     && ln -s /opt/pptx/node_modules /workspace/node_modules
 
 WORKDIR /workspace/work

@@ -10,12 +10,12 @@ def test_workflow_only_auto_runs_for_sandbox_context_changes() -> None:
         "push:",
         "branches: [main]",
         "sandbox/**",
-        "agent/skills/pptx/**",
         ".github/workflows/build-sandbox-image.yml",
         "scripts/sandbox_snapshot.py",
         "workflow_dispatch:",
     ):
         assert required in text
+    assert "agent/skills/pptx" not in text
 
 
 def test_workflow_serializes_latest_snapshot_updates() -> None:

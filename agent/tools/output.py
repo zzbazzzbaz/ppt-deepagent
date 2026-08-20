@@ -1,34 +1,32 @@
 from __future__ import annotations
 
-import asyncio
 import shlex
-import shutil
-import tempfile
 from collections.abc import Callable
-from datetime import datetime
-from pathlib import Path, PurePosixPath
+from datetime import UTC, datetime
+from pathlib import PurePosixPath
+from urllib.parse import quote
 from uuid import uuid4
 
-from deepagents.backends.protocol import FileDownloadResponse, SandboxBackendProtocol
+from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.tools import tool
 from langchain_core.tools import BaseTool, ToolException
 
-from agent.workspace import ThreadWorkspace
+from agent.settings import minio_settings
 
 _REMOTE_WORK = PurePosixPath("/workspace/work")
+_REMOTE_OUTPUT = PurePosixPath("/workspace/output")
 
 
-async def _collect_remote_files(
+async def _collect_pptx_files(
     backend: SandboxBackendProtocol,
-) -> list[tuple[str, Path]]:
+) -> list[PurePosixPath]:
     result = await backend.aglob("**/*", str(_REMOTE_WORK))
     if result.error is not None:
         raise ToolException(f"Failed to list remote work directory: {result.error}")
     if result.truncated:
         raise ToolException("Remote work directory listing was truncated.")
 
-    files: list[tuple[str, Path]] = []
-    relative_paths: set[Path] = set()
+    pptx_files: list[PurePosixPath] = []
     folded_paths: set[str] = set()
     for entry in result.matches or []:
         if entry.get("is_dir", False):
@@ -46,15 +44,15 @@ async def _collect_remote_files(
         if not relative_path.parts or any(part in {"", ".", ".."} for part in relative_path.parts):
             raise ToolException(f"Invalid remote work path: {remote_path}")
 
-        local_relative_path = Path(*relative_path.parts)
-        folded_path = local_relative_path.as_posix().casefold()
-        if local_relative_path in relative_paths or folded_path in folded_paths:
+        if relative_path.suffix.lower() != ".pptx":
+            continue
+        folded_path = relative_path.as_posix().casefold()
+        if folded_path in folded_paths:
             raise ToolException(f"Conflicting remote work path: {remote_path}")
-        relative_paths.add(local_relative_path)
         folded_paths.add(folded_path)
-        files.append((str(remote_path), local_relative_path))
+        pptx_files.append(relative_path)
 
-    return sorted(files)
+    return sorted(pptx_files)
 
 
 async def _reject_remote_symlinks(backend: SandboxBackendProtocol) -> None:
@@ -65,190 +63,134 @@ async def _reject_remote_symlinks(backend: SandboxBackendProtocol) -> None:
         raise ToolException(f"Remote work directory contains a symbolic link: {result.output}")
 
 
+async def _run_remote_command(
+    backend: SandboxBackendProtocol, command: str, label: str
+) -> None:
+    result = await backend.aexecute(command)
+    if result.exit_code != 0:
+        raise ToolException(f"{label} failed: {result.output}")
+
+
 async def _validate_pptx_files(
     backend: SandboxBackendProtocol,
     pptx_paths: list[str],
 ) -> None:
     for remote_path in pptx_paths:
-        result = await backend.aexecute(
-            "python /skills/pptx/scripts/office/validate.py "
-            + shlex.quote(remote_path)
+        await _run_remote_command(
+            backend,
+            "python /skills/pptx/scripts/office/validate.py " + shlex.quote(remote_path),
+            f"PPTX validation for {remote_path}",
         )
-        if result.exit_code != 0:
-            raise ToolException(
-                f"PPTX validation failed for {remote_path}: {result.output}"
+
+
+def _output_id(now: datetime) -> str:
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=UTC)
+    return f"{now.astimezone(UTC).strftime('%Y%m%dT%H%M%SZ')}-{uuid4().hex[:6]}"
+
+
+def _public_url(
+    public_base_url: str,
+    bucket: str,
+    thread_id: str,
+    output_id: str,
+    relative_path: PurePosixPath,
+) -> str:
+    object_key = "/".join(
+        (
+            "threads",
+            thread_id,
+            "output",
+            output_id,
+            *(quote(part) for part in relative_path.parts),
+        )
+    )
+    return f"{public_base_url.rstrip('/')}/{bucket}/{object_key}"
+
+
+async def _publish_pptx_files(
+    backend: SandboxBackendProtocol,
+    output_id: str,
+    pptx_files: list[PurePosixPath],
+) -> None:
+    def destination_for(relative_path: PurePosixPath) -> str:
+        return str(_REMOTE_OUTPUT / output_id / relative_path)
+
+    try:
+        for relative_path in pptx_files:
+            source = str(_REMOTE_WORK.joinpath(relative_path))
+            destination = destination_for(relative_path)
+            await _run_remote_command(
+                backend,
+                "mkdir -p -- " + shlex.quote(str(PurePosixPath(destination).parent)),
+                f"Creating output directory for {relative_path}",
             )
-
-
-def _validate_downloads(
-    requested_paths: list[str],
-    responses: list[FileDownloadResponse],
-) -> None:
-    if len(requested_paths) != len(responses):
-        raise ToolException(
-            "Remote work download response count does not match the request."
+            await _run_remote_command(
+                backend,
+                "cp -- " + shlex.quote(source) + " " + shlex.quote(destination),
+                f"Publishing {relative_path}",
+            )
+        for relative_path in pptx_files:
+            source = str(_REMOTE_WORK.joinpath(relative_path))
+            destination = destination_for(relative_path)
+            await _run_remote_command(
+                backend,
+                "cmp -s -- "
+                + shlex.quote(source)
+                + " "
+                + shlex.quote(destination)
+                + " && test -s -- "
+                + shlex.quote(destination),
+                f"Verifying published {relative_path}",
+            )
+    except ToolException:
+        await backend.aexecute(
+            "rm -rf -- " + shlex.quote(str(_REMOTE_OUTPUT / output_id))
         )
-    response_paths = [response.path for response in responses]
-    if response_paths != requested_paths:
-        raise ToolException("Remote work download response paths do not match the request.")
-    failures = [
-        f"{response.path}: {response.error or 'empty_content'}"
-        for response in responses
-        if response.error is not None or response.content is None
-    ]
-    if failures:
-        raise ToolException("Failed to download remote work files: " + "; ".join(failures))
-
-
-def _next_output_path(output_root: Path, now: datetime) -> Path:
-    stem = now.strftime("%Y%m%d-%H%M%S")
-    candidate = output_root / stem
-    suffix = 1
-    while candidate.exists():
-        candidate = output_root / f"{stem}-{suffix:02d}"
-        suffix += 1
-    return candidate
-
-
-def _prepare_staging_tree(
-    workspace: ThreadWorkspace,
-    files: list[tuple[str, Path]],
-    responses: list[FileDownloadResponse],
-    output_path: Path,
-) -> tuple[Path, Path, Path]:
-    workspace.root.mkdir(parents=True, exist_ok=True)
-    staging_root = Path(tempfile.mkdtemp(prefix=".save-output-", dir=workspace.root))
-    staged_work = staging_root / "work"
-    staged_output = staging_root / "output"
-    staged_work.mkdir()
-    staged_output.mkdir()
-    try:
-        for (_, relative_path), response in zip(files, responses, strict=True):
-            destination = staged_work / relative_path
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            assert response.content is not None
-            destination.write_bytes(response.content)
-
-        for _, relative_path in files:
-            if relative_path.suffix.lower() != ".pptx":
-                continue
-            source = staged_work / relative_path
-            destination = staged_output / relative_path
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, destination)
-    except Exception:
-        shutil.rmtree(staging_root, ignore_errors=True)
         raise
-    return staging_root, staged_work, staged_output
-
-
-def _commit_staging_tree(
-    workspace: ThreadWorkspace,
-    staging_root: Path,
-    staged_work: Path,
-    staged_output: Path,
-    output_path: Path,
-) -> None:
-    workspace.output.mkdir(parents=True, exist_ok=True)
-    backup_work = workspace.root / f".work-backup-{uuid4().hex}"
-    had_existing_work = workspace.work.exists()
-    committed_work = False
-    try:
-        if had_existing_work:
-            workspace.work.rename(backup_work)
-        staged_work.rename(workspace.work)
-        committed_work = True
-        staged_output.rename(output_path)
-    except Exception:
-        if output_path.exists():
-            shutil.rmtree(output_path, ignore_errors=True)
-        if committed_work and workspace.work.exists():
-            shutil.rmtree(workspace.work, ignore_errors=True)
-        if had_existing_work and backup_work.exists():
-            backup_work.rename(workspace.work)
-        raise
-    else:
-        if backup_work.exists():
-            shutil.rmtree(backup_work)
-    finally:
-        shutil.rmtree(staging_root, ignore_errors=True)
-
-
-def _save_downloads_locally(
-    workspace: ThreadWorkspace,
-    files: list[tuple[str, Path]],
-    responses: list[FileDownloadResponse],
-    timestamp: datetime,
-) -> Path:
-    output_path = _next_output_path(workspace.output, timestamp)
-    staging_root, staged_work, staged_output = _prepare_staging_tree(
-        workspace,
-        files,
-        responses,
-        output_path,
-    )
-    _commit_staging_tree(
-        workspace,
-        staging_root,
-        staged_work,
-        staged_output,
-        output_path,
-    )
-    return output_path
 
 
 def create_save_output_tool(
     backend: SandboxBackendProtocol,
-    workspace: ThreadWorkspace,
+    thread_id: str,
+    *,
     now: Callable[[], datetime] = datetime.now,
+    public_base_url: str | None = None,
 ) -> BaseTool:
+    base_url = (
+        public_base_url
+        if public_base_url is not None
+        else minio_settings.public_base_url
+    )
+    bucket = minio_settings.bucket
+
     @tool(
         "save_output",
         description=(
-            "校验并保存当前 Sandbox 的 /workspace/work/。"
-            "会下载全部工作文件，并将所有 PPTX 复制到本机时间戳输出目录。"
+            "校验 /workspace/work/ 中全部 PPTX，发布到 /workspace/output/<output-id>/，"
+            "并返回每个文件的公网下载链接。"
         ),
     )
     async def save_output() -> str:
-        files = await _collect_remote_files(backend)
-        if not files:
-            raise ToolException("Remote work directory is empty.")
-
-        pptx_paths = [
-            remote_path
-            for remote_path, relative_path in files
-            if relative_path.suffix.lower() == ".pptx"
-        ]
-        if not pptx_paths:
+        pptx_files = await _collect_pptx_files(backend)
+        if not pptx_files:
             raise ToolException("Remote work directory does not contain a PPTX file.")
 
         await _reject_remote_symlinks(backend)
-        await _validate_pptx_files(backend, pptx_paths)
-
-        remote_paths = [remote_path for remote_path, _ in files]
-        responses = await backend.adownload_files(remote_paths)
-        _validate_downloads(remote_paths, responses)
-
-        try:
-            output_path = await asyncio.to_thread(
-                _save_downloads_locally,
-                workspace,
-                files,
-                responses,
-                now(),
-            )
-        except Exception as exc:
-            raise ToolException(f"Failed to save local output: {exc}") from exc
-
-        saved_pptx = [
-            str(output_path / relative_path)
-            for _, relative_path in files
-            if relative_path.suffix.lower() == ".pptx"
-        ]
-        return (
-            f"Saved remote work to {workspace.work} and PPTX files to {output_path}: "
-            + ", ".join(saved_pptx)
+        await _validate_pptx_files(
+            backend, [str(_REMOTE_WORK.joinpath(path)) for path in pptx_files]
         )
+
+        output_id = _output_id(now())
+        await _publish_pptx_files(backend, output_id, pptx_files)
+
+        urls = [
+            _public_url(base_url, bucket, thread_id, output_id, relative_path)
+            for relative_path in pptx_files
+        ]
+        lines = [f"已发布 {len(pptx_files)} 个 PPTX 到 /workspace/output/{output_id}/："]
+        lines.extend(f"- {url}" for url in urls)
+        return "\n".join(lines)
 
     save_output.handle_tool_error = True
     return save_output

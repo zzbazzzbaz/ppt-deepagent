@@ -12,7 +12,6 @@ from agent.sandbox import get_thread_sandbox_backend
 from agent.tools.outline import submit_outline
 from agent.tools.output import create_save_output_tool
 from agent.tools.view import create_view_tool
-from agent.workspace import initialize_thread_workspace, thread_workspace
 
 _OUTLINE_INTERRUPT_CONFIG: InterruptOnConfig = {
     "allowed_decisions": ["approve", "edit", "reject"],
@@ -29,10 +28,8 @@ async def graph(config: RunnableConfig):
         get_thread_sandbox_backend,
         str(thread_id),
     )
-    workspace = thread_workspace(str(thread_id))
-    await initialize_thread_workspace(backend, workspace)
     view_tool = create_view_tool(backend, qwen_model)
-    save_output_tool = create_save_output_tool(backend, workspace)
+    save_output_tool = create_save_output_tool(backend, str(thread_id))
     return create_deep_agent(
         model=deepseek_model,
         tools=[submit_outline, view_tool, save_output_tool],

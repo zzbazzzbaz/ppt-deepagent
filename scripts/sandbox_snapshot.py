@@ -64,7 +64,6 @@ def prepare_build_context(project_root: Path, destination: Path) -> None:
     sandbox_dir = project_root / "sandbox"
     for name in _BUILD_ASSETS:
         shutil.copy2(sandbox_dir / name, destination / name)
-    shutil.copytree(project_root / "agent" / "skills" / "pptx", destination / "pptx")
 
 
 def _delete_failed_snapshots(client: SandboxClient, name: str) -> None:
@@ -165,10 +164,6 @@ def verify_snapshot(client: SandboxClient, name: str) -> None:
                     "node --version && python --version && soffice --version && pdftoppm -v && gcc --version",
                 ),
                 (
-                    "PPTX skill files",
-                    "test -f /skills/pptx/SKILL.md && test -f /skills/pptx/LICENSE.txt && test -d /skills/pptx/scripts/office/schemas",
-                ),
-                (
                     "package imports",
                     "node -e \"require('pptxgenjs'); require('react'); require('react-dom'); require('react-icons'); require('sharp')\" && python -c \"import defusedxml, lxml; from PIL import Image; from markitdown import MarkItDown\"",
                 ),
@@ -178,36 +173,20 @@ def verify_snapshot(client: SandboxClient, name: str) -> None:
                     "markitdown /workspace/work/original.pptx > /workspace/work/original.md",
                 ),
                 (
-                    "create thumbnail",
-                    "python /skills/pptx/scripts/thumbnail.py /workspace/work/original.pptx /workspace/work/thumbs",
-                ),
-                (
-                    "duplicate slide",
-                    "python /skills/pptx/scripts/add_slide.py /workspace/work/original.pptx slide1.xml -o /workspace/work/edited.pptx",
-                ),
-                (
-                    "validate edited PPTX",
-                    "python /skills/pptx/scripts/office/validate.py /workspace/work/edited.pptx --original /workspace/work/original.pptx",
-                ),
-                (
-                    "clean unpacked PPTX",
-                    "unzip -q /workspace/work/edited.pptx -d /workspace/work/unpacked && python /skills/pptx/scripts/clean.py /workspace/work/unpacked && cd /workspace/work/unpacked && zip -qr /workspace/work/cleaned.pptx .",
-                ),
-                (
-                    "validate cleaned PPTX",
-                    "python /skills/pptx/scripts/office/validate.py /workspace/work/cleaned.pptx --original /workspace/work/original.pptx",
+                    "OOXML round-trip",
+                    "unzip -q /workspace/work/original.pptx -d /workspace/work/unpacked && python -c \"import lxml.etree as ET; path = '/workspace/work/unpacked/ppt/slides/slide1.xml'; tree = ET.parse(path); tree.write(path)\" && cd /workspace/work/unpacked && zip -qr /workspace/work/edited.pptx .",
                 ),
                 (
                     "convert PPTX to PDF",
-                    "python /skills/pptx/scripts/office/soffice.py --headless --convert-to pdf --outdir /workspace/work /workspace/work/cleaned.pptx",
+                    "soffice --headless --convert-to pdf --outdir /workspace/work /workspace/work/edited.pptx",
                 ),
                 (
                     "render PDF pages",
-                    "pdftoppm -jpeg -r 150 /workspace/work/cleaned.pdf /workspace/work/slide",
+                    "pdftoppm -jpeg -r 150 /workspace/work/edited.pdf /workspace/work/slide",
                 ),
                 (
                     "verify artifacts",
-                    "test -s /workspace/work/original.md && test -s /workspace/work/thumbs.jpg && test -s /workspace/work/slide-1.jpg",
+                    "test -s /workspace/work/original.md && test -s /workspace/work/slide-1.jpg",
                 ),
             ),
         )

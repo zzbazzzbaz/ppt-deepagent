@@ -48,10 +48,10 @@ def test_package_and_lock_pin_node_22_compatible_sharp() -> None:
     assert lock["packages"]["node_modules/sharp"]["version"] == "0.35.3"
 
 
-def test_copies_only_snapshot_assets_and_complete_pptx_skill(
+def test_copies_only_snapshot_assets_without_skills_or_secrets(
     tmp_path: Path,
 ) -> None:
-    """Catches accidentally sending credentials or the whole repository to LangSmith."""
+    """Catches sending credentials, the whole repository, or the Skill to LangSmith."""
     prepare_build_context(PROJECT_ROOT, tmp_path)
 
     assert {path.name for path in tmp_path.iterdir()} == {
@@ -59,19 +59,8 @@ def test_copies_only_snapshot_assets_and_complete_pptx_skill(
         "package.json",
         "package-lock.json",
         "requirements.txt",
-        "pptx",
     }
-    expected = sorted(
-        path.relative_to(PROJECT_ROOT / "agent" / "skills" / "pptx")
-        for path in (PROJECT_ROOT / "agent" / "skills" / "pptx").rglob("*")
-        if path.is_file()
-    )
-    actual = sorted(
-        path.relative_to(tmp_path / "pptx")
-        for path in (tmp_path / "pptx").rglob("*")
-        if path.is_file()
-    )
-    assert actual == expected
+    assert not (tmp_path / "pptx").exists()
     assert not (tmp_path / ".env").exists()
     assert not (tmp_path / "workspace").exists()
 
