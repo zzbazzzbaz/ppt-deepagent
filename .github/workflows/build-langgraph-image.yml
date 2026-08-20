@@ -1,0 +1,61 @@
+name: Build LangGraph Server Image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "agent/**"
+      - "langgraph.json"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/build-langgraph-image.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ppt-deepagent-langgraph-image
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate image metadata
+        id: metadata
+        shell: bash
+        run: |
+          timestamp="$(date -u +%Y%m%d-%H%M%S)"
+          echo "timestamp=${timestamp}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Build LangGraph server image
+        run: uv run --frozen langgraph build -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ppt-deepagent-langgraph-${{ steps.metadata.outputs.timestamp }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image
+        run: |
+          image="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ppt-deepagent-langgraph-${{ steps.metadata.outputs.timestamp }}"
+          docker tag "$image" "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ppt-deepagent-langgraph-latest"
+          docker push "$image"
+          docker push "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ppt-deepagent-langgraph-latest"

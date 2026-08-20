@@ -12,7 +12,6 @@ dependencies = [
     "langchain-quickjs==0.3.5",
     "langsmith[sandbox]==0.11.0",
     "pydantic-settings==2.15.0",
-    "langchain-daytona>=0.0.8",
     "boto3>=1.43.75",
 ]
 
