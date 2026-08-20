@@ -41,6 +41,7 @@ RUN npm ci --omit=dev --ignore-scripts \
 
 COPY agent/skills/pptx /skills/pptx
 
-RUN mkdir -p /workspace/input /workspace/work /workspace/output
+RUN mkdir -p /workspace/input /workspace/work /workspace/output \
+    && ln -s /opt/pptx/node_modules /node_modules
 
 WORKDIR /workspace/work

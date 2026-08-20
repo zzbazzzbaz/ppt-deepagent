@@ -37,6 +37,7 @@ def test_dockerfile_uses_pinned_node_22_runtime() -> None:
     assert "\n    npm \\" not in dockerfile
     assert "npm ci --omit=dev --ignore-scripts" in dockerfile
     assert "COPY agent/skills/pptx /skills/pptx" in dockerfile
+    assert "ln -s /opt/pptx/node_modules /node_modules" in dockerfile
 
 
 def test_package_and_lock_pin_node_22_compatible_sharp() -> None:
