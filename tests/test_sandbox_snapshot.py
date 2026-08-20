@@ -36,7 +36,7 @@ def test_dockerfile_uses_pinned_node_22_runtime() -> None:
     assert "\n    nodejs \\" not in dockerfile
     assert "\n    npm \\" not in dockerfile
     assert "npm ci --omit=dev --ignore-scripts" in dockerfile
-    assert "ln -s /opt/pptx/node_modules /workspace/node_modules" in dockerfile
+    assert "ln -s /opt/pptx/node_modules /mnt/mounts/node_modules" in dockerfile
 
 
 def test_package_and_lock_pin_node_22_compatible_sharp() -> None:
