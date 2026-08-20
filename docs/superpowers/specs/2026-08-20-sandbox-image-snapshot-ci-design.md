@@ -14,7 +14,7 @@
 - 不为普通 Agent 业务代码变更构建 Sandbox 镜像。
 - 不在 GitHub Actions 中配置 DeepSeek、Qwen 或其他与 Snapshot 同步无关的密钥。
 - 不长期保留 candidate 或时间戳 Snapshot。
-- 不改变 Snapshot 的 8 GiB 文件系统容量。
+- Snapshot 文件系统容量固定为 2 GiB。
 
 ## 命名
 
@@ -48,7 +48,7 @@ Sharp 更新为与 Node 22 兼容的固定版本，`package.json` 与 `package-l
 
 ## 资源配置
 
-- Snapshot 文件系统容量：8 GiB。
+- Snapshot 文件系统容量：2 GiB。
 - 所有 Thread Sandbox 内存：2 GiB。
 - 所有 Snapshot verify 临时 Sandbox 内存：2 GiB。
 - Thread Sandbox 的 vCPU 和文件系统配置继续使用 LangSmith provider 默认值，本次不新增覆盖。
@@ -154,7 +154,7 @@ CLI 不再通过导入 `agent.settings` 加载全部应用配置。它只从进�
 - 时间戳镜像引用。
 - immutable image digest。
 - latest Snapshot ID 和状态。
-- Snapshot 文件系统容量 8 GiB。
+- Snapshot 文件系统容量 2 GiB。
 - candidate 与 verify Sandbox 已清理。
 
 随后运行现有 Snapshot 完整验证矩阵和 PPTX E2E smoke，确认 PptxGenJS、Sharp、Python 依赖、LibreOffice、Poppler、视觉检查和 `save_output` 均可用。
