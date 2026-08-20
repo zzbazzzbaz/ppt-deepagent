@@ -7,7 +7,7 @@ deepseek_model = init_chat_model(
     model_provider=deepseek_settings.model_provider,
     base_url=deepseek_settings.base_url,
     api_key=deepseek_settings.api_key,
-    timeout=60,
+    timeout=300,
 )
 
 qwen_model = init_chat_model(
@@ -15,5 +15,5 @@ qwen_model = init_chat_model(
     model_provider=qwen_settings.model_provider,
     base_url=qwen_settings.base_url,
     api_key=qwen_settings.api_key,
-    timeout=60,
+    timeout=300,
 )
