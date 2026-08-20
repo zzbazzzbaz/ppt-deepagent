@@ -31,32 +31,6 @@ submit_outline ──► 人工审批中断（approve / edit / reject）
 save_output 上传 MinIO 并返回下载链接 → sync(upload) 回传工作产物
 ```
 
-## 快速开始
-
-### 环境要求
-
-- Python >= 3.13
-- [uv](https://docs.astral.sh/uv/)
-- 可用的 LangSmith（含 Sandbox）、DeepSeek、Qwen（阿里百炼）、MinIO 服务
-
-### 安装与配置
-
-```bash
-uv sync
-cp .env.example .env
-# 编辑 .env，填入模型 / LangSmith / Sandbox / MinIO 配置
-```
-
-各配置前缀见 `.env.example`：`DEEPSEEK_`、`QWEN_`、`LANGSMITH_`、`SANDBOX_`、`MINIO_`。
-
-### 启动 agent server
-
-```bash
-uv run langgraph dev --no-browser --no-reload --port 2024
-```
-
-通过 LangGraph API 以 `thread_id` 发起会话，与 Agent Server 交互即可。
-
 ## 项目结构
 
 ```
@@ -82,13 +56,24 @@ tests/                # pytest 测试
 docs/deploy/          # docker-compose 部署（postgres + redis + langgraph-server）
 ```
 
-## 测试与 lint
-
-```bash
-uv run pytest          # sandbox 相关测试依赖真实 LangSmith Sandbox 服务
-uv run ruff check .
-```
-
 ## 部署
 
 生产部署使用 `docs/deploy/docker-compose.yml`：Postgres + Redis + LangGraph Server 容器，镜像由 CI 构建发布。
+
+# 常用命令
+
+```shell
+sudo docker compose pull
+sudo docker compose up -d --force-recreate
+```
+
+```shell
+# 启动langgraph server
+uv run langgraph dev --no-browser --no-reload --port 2024
+# 端到端测试
+uv run python -m scripts.smoke_pptx_e2e
+```
+
+```shell
+https://agentchat.vercel.app/?apiUrl=https://ppt-deepagent.gqt.plus&assistantId=agent&apiKey=<langsmith api key>
+```
