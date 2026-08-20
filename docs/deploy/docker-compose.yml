@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: langgraph
+      POSTGRES_PASSWORD: 123456
+      POSTGRES_DB: langgraph
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langgraph"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  langgraph-server:
+    image: ghcr.io/zzbazzzbaz/ppt-deepagent:ppt-deepagent-langgraph-latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URI: postgresql://langgraph:123456@postgres:5432/langgraph
+      REDIS_URI: redis://redis:6379/0
+    ports:
+      - "10016:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  redis-data:
