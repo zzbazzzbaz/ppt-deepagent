@@ -39,7 +39,7 @@ RUN npm ci --omit=dev --ignore-scripts \
     && npm cache clean --force \
     && rm -rf /tmp/pptx-requirements.txt /root/.npm
 
-RUN mkdir -p /mnt/mounts/skills /mnt/mounts/input /mnt/mounts/work /mnt/mounts/output \
+RUN mkdir -p /mnt/mounts/skills /mnt/mounts/input /mnt/mounts/work /mnt/mounts/output /workspace \
     && ln -s /mnt/mounts/skills /skills \
     && ln -s /mnt/mounts/input /workspace/input \
     && ln -s /mnt/mounts/work /workspace/work \
