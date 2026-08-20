@@ -1,13 +1,18 @@
 name: Build Sandbox Image
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "sandbox/**"
+      - "agent/skills/pptx/**"
+      - ".github/workflows/build-sandbox-image.yml"
+      - "scripts/sandbox_snapshot.py"
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Image version tag (e.g. v1)"
-        required: true
-        default: "v1"
-        type: string
+
+concurrency:
+  group: ppt-deepagent-sandbox-snapshot-sync
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -23,6 +28,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Generate image metadata
+        id: metadata
+        shell: bash
+        run: |
+          timestamp="$(date -u +%Y%m%d-%H%M%S)"
+          echo "timestamp=${timestamp}" >> "$GITHUB_OUTPUT"
 
       - name: Prepare build context
         run: |
@@ -42,13 +54,32 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: /tmp/sandbox-context
           file: /tmp/sandbox-context/Dockerfile
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.version }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ppt-deepagent-sandbox-${{ steps.metadata.outputs.timestamp }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ppt-deepagent-sandbox-latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        run: uv sync --frozen
+
+      - name: Synchronize LangSmith snapshot
+        env:
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+        run: |
+          uv run --frozen python -m scripts.sandbox_snapshot sync-image \
+            --name ppt-deepagent-sandbox-latest \
+            --candidate-name ppt-deepagent-sandbox-candidate-${{ steps.metadata.outputs.timestamp }} \
+            --docker-image "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ppt-deepagent-sandbox-${{ steps.metadata.outputs.timestamp }}" \
+            --image-digest "${{ steps.build.outputs.digest }}"
