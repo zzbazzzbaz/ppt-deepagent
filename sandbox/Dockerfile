@@ -39,11 +39,8 @@ RUN npm ci --omit=dev --ignore-scripts \
     && npm cache clean --force \
     && rm -rf /tmp/pptx-requirements.txt /root/.npm
 
-RUN mkdir -p /mnt/mounts/skills /mnt/mounts/input /mnt/mounts/work /mnt/mounts/output /workspace \
-    && ln -s /opt/pptx/node_modules /mnt/mounts/node_modules \
-    && ln -s /mnt/mounts/skills /skills \
-    && ln -s /mnt/mounts/input /workspace/input \
-    && ln -s /mnt/mounts/work /workspace/work \
-    && ln -s /mnt/mounts/output /workspace/output
+COPY agent/skills/pptx /skills/pptx
+
+RUN mkdir -p /workspace/input /workspace/work /workspace/output
 
 WORKDIR /workspace/work

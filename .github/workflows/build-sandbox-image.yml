@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "sandbox/**"
+      - "agent/skills/pptx/**"
       - ".github/workflows/build-sandbox-image.yml"
       - "scripts/sandbox_snapshot.py"
   workflow_dispatch:
@@ -37,9 +38,11 @@ jobs:
 
       - name: Prepare build context
         run: |
-          mkdir -p /tmp/sandbox-context
+          mkdir -p /tmp/sandbox-context/agent/skills
           cp sandbox/Dockerfile sandbox/package.json sandbox/package-lock.json sandbox/requirements.txt /tmp/sandbox-context/
-          ls -la /tmp/sandbox-context
+          cp -R agent/skills/pptx /tmp/sandbox-context/agent/skills/pptx
+          printf '__pycache__/\n*.py[cod]\n.DS_Store\n' > /tmp/sandbox-context/.dockerignore
+          ls -la /tmp/sandbox-context /tmp/sandbox-context/agent/skills/pptx
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

@@ -64,6 +64,10 @@ def prepare_build_context(project_root: Path, destination: Path) -> None:
     sandbox_dir = project_root / "sandbox"
     for name in _BUILD_ASSETS:
         shutil.copy2(sandbox_dir / name, destination / name)
+    skill_src = project_root / "agent" / "skills" / "pptx"
+    skill_dst = destination / "agent" / "skills" / "pptx"
+    skill_dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(skill_src, skill_dst, ignore=shutil.ignore_patterns("*__pycache__", "*.pyc", ".DS_Store"))
 
 
 def _delete_failed_snapshots(client: SandboxClient, name: str) -> None:

@@ -21,6 +21,7 @@ from langsmith.sandbox import ResourceNotFoundError, SandboxClient
 AGENT_SERVER_URL = os.getenv("AGENT_SERVER_URL", "http://127.0.0.1:2024")
 ASSISTANT_ID = "ppt_agent"
 _REQUIRED_TEXT = "可编辑演示"
+_KEEP_SANDBOX = os.getenv("SMOKE_KEEP_SANDBOX", "1") != "0"
 
 
 def _tool_calls(messages: list[dict[str, Any]], name: str) -> list[dict[str, Any]]:
@@ -161,15 +162,11 @@ def _assert_trace_components(
 
 
 def _minio_client(minio_settings: Any) -> Any:
-    access_key = os.getenv("MINIO_ACCESS_KEY")
-    secret_key = os.getenv("MINIO_SECRET_KEY")
-    if not access_key or not secret_key:
-        raise RuntimeError("MINIO_ACCESS_KEY and MINIO_SECRET_KEY must be set")
     return boto3.client(
         "s3",
         endpoint_url=minio_settings.endpoint_url,
-        aws_access_key_id=access_key,
-        aws_secret_access_key=secret_key,
+        aws_access_key_id=minio_settings.access_key,
+        aws_secret_access_key=minio_settings.secret_key,
         region_name=minio_settings.region,
         config=Config(
             s3={"addressing_style": "path" if minio_settings.path_style else "virtual"}
@@ -204,20 +201,26 @@ def _assert_minio_artifacts(
     if not any(key.endswith(".jpg") for key in work_keys):
         raise RuntimeError("MinIO work prefix is missing rendered JPEG files")
 
-    output_prefix = f"threads/{thread_id}/output/"
+    thread_prefix = f"threads/{thread_id}/"
+    excluded_prefixes = (
+        f"threads/{thread_id}/input/",
+        f"threads/{thread_id}/work/",
+    )
     output_pptx = [
-        key for key in _list_keys(s3, bucket, output_prefix) if key.endswith(".pptx")
+        key
+        for key in _list_keys(s3, bucket, thread_prefix)
+        if key.endswith(".pptx") and not key.startswith(excluded_prefixes)
     ]
     if not output_pptx:
-        raise RuntimeError("MinIO output prefix is missing published PPTX files")
+        raise RuntimeError("MinIO thread prefix is missing published PPTX files")
     output_ids = sorted(
-        {key[len(output_prefix):].split("/", 1)[0] for key in output_pptx}
+        {key[len(thread_prefix):].split("/", 1)[0] for key in output_pptx}
     )
     latest_id = output_ids[-1]
     latest_pptx = [
         key
         for key in output_pptx
-        if key[len(output_prefix):].startswith(f"{latest_id}/")
+        if key[len(thread_prefix):].startswith(f"{latest_id}/")
     ]
     latest_key = latest_pptx[-1]
     body = s3.get_object(Bucket=bucket, Key=latest_key)["Body"].read()
@@ -317,7 +320,7 @@ async def _run_smoke() -> None:
         print(f"PPTX E2E smoke passed for thread {thread_id}")
         print(f"Sandbox: {sandbox_name}")
         print(f"LangSmith trace: {trace_id}")
-        print(f"MinIO output prefix: threads/{thread_id}/output/")
+        print(f"MinIO output prefix: threads/{thread_id}/<timestamp>/")
         for url in urls:
             print(f"Public URL: {url}")
     except Exception as exc:
@@ -327,14 +330,16 @@ async def _run_smoke() -> None:
             await agent_client.threads.delete(thread_id)
         except Exception as exc:
             cleanup_errors.append(exc)
-        try:
-            sandbox_client.delete_sandbox(sandbox_name)
-        except ResourceNotFoundError:
-            pass
-        except Exception as exc:
-            cleanup_errors.append(exc)
-        finally:
-            sandbox_client.close()
+        if _KEEP_SANDBOX:
+            print(f"Keeping sandbox {sandbox_name} (set SMOKE_KEEP_SANDBOX=0 to delete)")
+        else:
+            try:
+                sandbox_client.delete_sandbox(sandbox_name)
+            except ResourceNotFoundError:
+                pass
+            except Exception as exc:
+                cleanup_errors.append(exc)
+        sandbox_client.close()
 
     if primary_error is not None:
         for cleanup_error in cleanup_errors:

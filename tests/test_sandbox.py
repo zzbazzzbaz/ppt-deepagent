@@ -16,9 +16,11 @@ _TEST_ENV = {
     "LANGSMITH_API_KEY": "test-langsmith-key",
     "LANGSMITH_PROJECT": "test-project",
     "LANGSMITH_TRACING": "false",
+    "MINIO_ACCESS_KEY": "test-access-key",
     "MINIO_BUCKET": "test-bucket",
     "MINIO_ENDPOINT_URL": "https://test-minio.example.com",
-    "MINIO_PUBLIC_BASE_URL": "https://test-minio.example.com",
+    "MINIO_PUBLIC_BASE_URL": "https://test-minio.example.com/test-bucket",
+    "MINIO_SECRET_KEY": "test-secret-key",
     "QWEN_API_KEY": "test-qwen-key",
     "QWEN_BASE_URL": "https://example.com/qwen",
     "QWEN_MODEL": "test-qwen-model",
@@ -62,23 +64,8 @@ def sandbox_settings_stub() -> None:
             mem_bytes=2 * 1024**3,
         ),
     )
-    minio_patch = patch.object(
-        sandbox_module,
-        "minio_settings",
-        SimpleNamespace(
-            endpoint_url="https://test-minio.example.com",
-            bucket="test-bucket",
-            region="test-region",
-            path_style=True,
-            public_base_url="https://test-minio.example.com",
-            access_key_secret="PPT_MINIO_ACCESS_KEY",
-            secret_key_secret="PPT_MINIO_SECRET_KEY",
-        ),
-    )
     settings_patch.start()
-    minio_patch.start()
     yield
-    minio_patch.stop()
     settings_patch.stop()
 
 
@@ -103,11 +90,10 @@ def test_creates_thread_sandbox_from_configured_snapshot(client: Mock) -> None:
     assert kwargs["idle_ttl_seconds"] == 60
     assert kwargs["delete_after_stop_seconds"] == 60
     assert kwargs["mem_bytes"] == 2 * 1024**3
-    assert "mount_config" in kwargs
 
 
-def test_creates_thread_sandbox_with_minio_mounts(client: Mock) -> None:
-    """Catches a Sandbox without MinIO mounts, wrong prefixes, or wrong write access."""
+def test_creates_thread_sandbox_without_mount_config(client: Mock) -> None:
+    """Catches a Sandbox still requesting S3 mounts that no longer exist."""
     sandbox_module = importlib.import_module("agent.sandbox")
     client.get_sandbox.side_effect = ResourceNotFoundError("missing")
     client.create_sandbox.return_value = SimpleNamespace(
@@ -119,39 +105,8 @@ def test_creates_thread_sandbox_with_minio_mounts(client: Mock) -> None:
     with patch.object(sandbox_module, "_client", client):
         sandbox_module._get_or_create_thread_sandbox(THREAD_ID)
 
-    mount_config = client.create_sandbox.call_args.kwargs["mount_config"]
-    assert mount_config["auth"] == {
-        "aws": {
-            "access_key_id": {
-                "type": "workspace_secret",
-                "value": "{PPT_MINIO_ACCESS_KEY}",
-            },
-            "secret_access_key": {
-                "type": "workspace_secret",
-                "value": "{PPT_MINIO_SECRET_KEY}",
-            },
-        }
-    }
-    mounts = {mount["id"]: mount for mount in mount_config["mounts"]}
-    expected = {
-        "skills": ("/mnt/mounts/skills", "skills", True),
-        "input": ("/mnt/mounts/input", f"threads/{THREAD_ID}/input", True),
-        "work": ("/mnt/mounts/work", f"threads/{THREAD_ID}/work", False),
-        "output": ("/mnt/mounts/output", f"threads/{THREAD_ID}/output", False),
-    }
-    assert set(mounts) == set(expected)
-    for mount_id, (mount_path, prefix, read_only) in expected.items():
-        mount = mounts[mount_id]
-        assert mount["type"] == "s3"
-        assert mount["mount_path"] == mount_path
-        assert mount["read_only"] is read_only
-        assert mount["s3"] == {
-            "endpoint_url": "https://test-minio.example.com",
-            "region": "test-region",
-            "bucket": "test-bucket",
-            "path_style": True,
-            "prefix": prefix,
-        }
+    kwargs = client.create_sandbox.call_args.kwargs
+    assert "mount_config" not in kwargs
 
 
 def test_rejects_existing_thread_sandbox_from_different_snapshot(

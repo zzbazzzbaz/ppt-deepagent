@@ -36,7 +36,7 @@ def test_dockerfile_uses_pinned_node_22_runtime() -> None:
     assert "\n    nodejs \\" not in dockerfile
     assert "\n    npm \\" not in dockerfile
     assert "npm ci --omit=dev --ignore-scripts" in dockerfile
-    assert "ln -s /opt/pptx/node_modules /mnt/mounts/node_modules" in dockerfile
+    assert "COPY agent/skills/pptx /skills/pptx" in dockerfile
 
 
 def test_package_and_lock_pin_node_22_compatible_sharp() -> None:
@@ -48,10 +48,10 @@ def test_package_and_lock_pin_node_22_compatible_sharp() -> None:
     assert lock["packages"]["node_modules/sharp"]["version"] == "0.35.3"
 
 
-def test_copies_only_snapshot_assets_without_skills_or_secrets(
+def test_copies_only_snapshot_assets_with_pptx_skill_without_secrets(
     tmp_path: Path,
 ) -> None:
-    """Catches sending credentials, the whole repository, or the Skill to LangSmith."""
+    """Catches sending credentials, the whole repository, or secrets to LangSmith."""
     prepare_build_context(PROJECT_ROOT, tmp_path)
 
     assert {path.name for path in tmp_path.iterdir()} == {
@@ -59,10 +59,15 @@ def test_copies_only_snapshot_assets_without_skills_or_secrets(
         "package.json",
         "package-lock.json",
         "requirements.txt",
+        "agent",
     }
-    assert not (tmp_path / "pptx").exists()
+    skill_dir = tmp_path / "agent" / "skills" / "pptx"
+    assert skill_dir.is_dir()
+    assert (skill_dir / "SKILL.md").exists()
+    assert (skill_dir / "scripts" / "office" / "validate.py").exists()
     assert not (tmp_path / ".env").exists()
     assert not (tmp_path / "workspace").exists()
+    assert not any(skill_dir.rglob("*__pycache__*"))
 
 
 def test_build_refuses_to_overwrite_existing_snapshot() -> None:

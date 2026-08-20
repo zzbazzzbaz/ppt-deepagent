@@ -1,20 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import shlex
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from urllib.parse import quote
-from uuid import uuid4
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.tools import tool
 from langchain_core.tools import BaseTool, ToolException
 
 from agent.settings import minio_settings
+from agent.storage import S3Client, create_s3_client, delete_object, put_object_body
 
 _REMOTE_WORK = PurePosixPath("/workspace/work")
-_REMOTE_OUTPUT = PurePosixPath("/workspace/output")
 
 
 async def _collect_pptx_files(
@@ -83,79 +83,90 @@ async def _validate_pptx_files(
         )
 
 
-def _output_id(now: datetime) -> str:
+def _timestamp(now: datetime) -> str:
     if now.tzinfo is None:
         now = now.replace(tzinfo=UTC)
-    return f"{now.astimezone(UTC).strftime('%Y%m%dT%H%M%SZ')}-{uuid4().hex[:6]}"
+    return now.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _object_key(
+    thread_id: str,
+    timestamp: str,
+    relative_path: PurePosixPath,
+) -> str:
+    return "/".join(("threads", thread_id, timestamp, *relative_path.parts))
 
 
 def _public_url(
     public_base_url: str,
     thread_id: str,
-    output_id: str,
+    timestamp: str,
     relative_path: PurePosixPath,
 ) -> str:
-    object_key = "/".join(
-        (
-            "threads",
-            thread_id,
-            "output",
-            output_id,
-            *(quote(part) for part in relative_path.parts),
-        )
+    quoted_key = "/".join(
+        ("threads", thread_id, timestamp, *(quote(part) for part in relative_path.parts))
     )
-    return f"{public_base_url.rstrip('/')}/{object_key}"
+    return f"{public_base_url.rstrip('/')}/{quoted_key}"
 
 
-async def _publish_pptx_files(
+async def _download_work_files(
     backend: SandboxBackendProtocol,
-    output_id: str,
     pptx_files: list[PurePosixPath],
-) -> None:
-    def destination_for(relative_path: PurePosixPath) -> str:
-        return str(_REMOTE_OUTPUT / output_id / relative_path)
+) -> dict[PurePosixPath, bytes]:
+    remote_paths = [str(_REMOTE_WORK.joinpath(path)) for path in pptx_files]
+    responses = await backend.adownload_files(remote_paths)
+    failures = [
+        f"{response.path}: {response.error or 'empty_content'}"
+        for response in responses
+        if response.error is not None or response.content is None
+    ]
+    if failures:
+        raise ToolException("读取 PPTX 文件失败：" + "; ".join(failures))
 
+    contents: dict[PurePosixPath, bytes] = {}
+    for relative_path, response in zip(pptx_files, responses, strict=True):
+        assert response.content is not None
+        if not response.content:
+            raise ToolException(f"PPTX 文件为空：{relative_path.as_posix()}")
+        contents[relative_path] = response.content
+    return contents
+
+
+async def _upload_pptx_files(
+    client: S3Client,
+    bucket: str,
+    thread_id: str,
+    timestamp: str,
+    contents: dict[PurePosixPath, bytes],
+) -> None:
+    uploaded_keys: list[str] = []
     try:
-        for relative_path in pptx_files:
-            source = str(_REMOTE_WORK.joinpath(relative_path))
-            destination = destination_for(relative_path)
-            await _run_remote_command(
-                backend,
-                "mkdir -p -- " + shlex.quote(str(PurePosixPath(destination).parent)),
-                f"Creating output directory for {relative_path}",
-            )
-            await _run_remote_command(
-                backend,
-                "cp -- " + shlex.quote(source) + " " + shlex.quote(destination),
-                f"Publishing {relative_path}",
-            )
-        for relative_path in pptx_files:
-            source = str(_REMOTE_WORK.joinpath(relative_path))
-            destination = destination_for(relative_path)
-            await _run_remote_command(
-                backend,
-                "cmp -s -- "
-                + shlex.quote(source)
-                + " "
-                + shlex.quote(destination)
-                + " && test -s -- "
-                + shlex.quote(destination),
-                f"Verifying published {relative_path}",
-            )
-    except ToolException:
-        await backend.aexecute(
-            "rm -rf -- " + shlex.quote(str(_REMOTE_OUTPUT / output_id))
-        )
-        raise
+        for relative_path, content in sorted(contents.items()):
+            key = _object_key(thread_id, timestamp, relative_path)
+            await asyncio.to_thread(put_object_body, client, bucket, key, content)
+            uploaded_keys.append(key)
+    except Exception as exc:
+        for key in uploaded_keys:
+            try:
+                await asyncio.to_thread(delete_object, client, bucket, key)
+            except Exception:
+                pass
+        raise ToolException(
+            f"上传 PPTX 到 MinIO 失败：{type(exc).__name__}: {exc}"
+        ) from exc
 
 
 def create_save_output_tool(
     backend: SandboxBackendProtocol,
     thread_id: str,
     *,
+    s3_client: S3Client | None = None,
+    bucket: str | None = None,
     now: Callable[[], datetime] = datetime.now,
     public_base_url: str | None = None,
 ) -> BaseTool:
+    client = s3_client if s3_client is not None else create_s3_client()
+    resolved_bucket = bucket if bucket is not None else minio_settings.bucket
     base_url = (
         public_base_url
         if public_base_url is not None
@@ -165,7 +176,7 @@ def create_save_output_tool(
     @tool(
         "save_output",
         description=(
-            "校验 /workspace/work/ 中全部 PPTX，发布到 /workspace/output/<output-id>/，"
+            "校验 /workspace/work/ 中全部 PPTX，上传到 MinIO threads/<thread_id>/<时间戳>/ 目录，"
             "并返回每个文件的公网下载链接。"
         ),
     )
@@ -178,15 +189,20 @@ def create_save_output_tool(
         await _validate_pptx_files(
             backend, [str(_REMOTE_WORK.joinpath(path)) for path in pptx_files]
         )
+        contents = await _download_work_files(backend, pptx_files)
 
-        output_id = _output_id(now())
-        await _publish_pptx_files(backend, output_id, pptx_files)
+        timestamp = _timestamp(now())
+        await _upload_pptx_files(
+            client, resolved_bucket, thread_id, timestamp, contents
+        )
 
         urls = [
-            _public_url(base_url, thread_id, output_id, relative_path)
-            for relative_path in pptx_files
+            _public_url(base_url, thread_id, timestamp, relative_path)
+            for relative_path in sorted(contents)
         ]
-        lines = [f"已发布 {len(pptx_files)} 个 PPTX 到 /workspace/output/{output_id}/："]
+        lines = [
+            f"已上传 {len(urls)} 个 PPTX 到 threads/{thread_id}/{timestamp}/："
+        ]
         lines.extend(f"- {url}" for url in urls)
         return "\n".join(lines)
 

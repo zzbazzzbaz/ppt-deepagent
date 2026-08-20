@@ -50,8 +50,8 @@ class MinioSettings(BaseSettings):
     public_base_url: str = Field(
         description="Object store root URL that already includes the bucket."
     )
-    access_key_secret: str = "PPT_MINIO_ACCESS_KEY"
-    secret_key_secret: str = "PPT_MINIO_SECRET_KEY"
+    access_key: str
+    secret_key: str
 
 
 class SandboxSettings(BaseSettings):

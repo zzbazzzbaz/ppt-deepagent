@@ -36,16 +36,20 @@ def _load_agent_module_with_test_env() -> None:
 async def test_graph_passes_backend_and_thread_id_to_output_tool() -> None:
     agent_module = importlib.import_module("agent.agent")
     backend = Mock()
+    s3_client = Mock()
     view_tool = Mock()
     view_tool.name = "view"
     save_output_tool = Mock()
     save_output_tool.name = "save_output"
+    sync_tool = Mock()
+    sync_tool.name = "sync"
     with (
         patch.object(
             agent_module,
             "get_thread_sandbox_backend",
             return_value=backend,
         ),
+        patch.object(agent_module, "create_s3_client", return_value=s3_client),
         patch.object(agent_module, "create_view_tool", return_value=view_tool),
         patch.object(
             agent_module,
@@ -54,34 +58,47 @@ async def test_graph_passes_backend_and_thread_id_to_output_tool() -> None:
         ) as create_save_output_tool,
         patch.object(
             agent_module,
+            "create_sync_tool",
+            return_value=sync_tool,
+        ) as create_sync_tool,
+        patch.object(
+            agent_module,
             "create_deep_agent",
             return_value=Mock(),
         ),
     ):
         await agent_module.graph({"configurable": {"thread_id": THREAD_ID}})
 
-    create_save_output_tool.assert_called_once_with(backend, THREAD_ID)
+    create_save_output_tool.assert_called_once_with(
+        backend, THREAD_ID, s3_client=s3_client
+    )
+    create_sync_tool.assert_called_once_with(backend, THREAD_ID, s3_client=s3_client)
 
 
 async def test_graph_loads_skill_and_registers_output_tools() -> None:
     """Catches the generation runtime starting without the Skill or output publishing."""
     agent_module = importlib.import_module("agent.agent")
     backend = Mock()
+    s3_client = Mock()
     expected_graph = object()
     view_tool = Mock()
     view_tool.name = "view"
     save_output_tool = Mock()
     save_output_tool.name = "save_output"
+    sync_tool = Mock()
+    sync_tool.name = "sync"
     with (
         patch.object(
             agent_module,
             "get_thread_sandbox_backend",
             return_value=backend,
         ),
+        patch.object(agent_module, "create_s3_client", return_value=s3_client),
         patch.object(agent_module, "create_view_tool", return_value=view_tool),
         patch.object(
             agent_module, "create_save_output_tool", return_value=save_output_tool
         ),
+        patch.object(agent_module, "create_sync_tool", return_value=sync_tool),
         patch.object(
             agent_module,
             "create_deep_agent",
@@ -98,5 +115,6 @@ async def test_graph_loads_skill_and_registers_output_tools() -> None:
     assert [tool.name for tool in tools] == [
         "submit_outline",
         "view",
+        "sync",
         "save_output",
     ]
