@@ -1,3 +1,4 @@
+## 通用约束
+
 - 没有允许不能使用 agent-browser skill
-- 如果是开发测试langsmith sandbox不需要关闭，因为每次开关都很浪费时间
-- agent server如果使用一定要重新启动，因为可能是旧进程，并且不要热更新
+- agent server 如果使用一定要重新启动，因为可能是旧进程，并且不要热更新：`uv run langgraph dev --no-browser --no-reload --port 2024`

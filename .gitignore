@@ -9,3 +9,8 @@ __pycache__/
 
 # 对话历史（不纳入版本控制）
 docs/_chat/
+
+# 构建产物
+*.egg-info/
+build/
+dist/
