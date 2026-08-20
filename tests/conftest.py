@@ -12,7 +12,7 @@ _TEST_ENV_DEFAULTS = {
     "LANGSMITH_TRACING": "false",
     "MINIO_BUCKET": "test-bucket",
     "MINIO_ENDPOINT_URL": "https://test-minio.example.com",
-    "MINIO_PUBLIC_BASE_URL": "https://test-minio.example.com",
+    "MINIO_PUBLIC_BASE_URL": "https://test-minio.example.com/test-bucket",
     "QWEN_API_KEY": "test-qwen-key",
     "QWEN_BASE_URL": "https://example.com/qwen",
     "QWEN_MODEL": "test-qwen-model",

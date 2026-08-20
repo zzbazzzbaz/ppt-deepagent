@@ -223,4 +223,4 @@ async def test_publishes_explicit_public_base_url() -> None:
 
     result = await tool.ainvoke({})
 
-    assert "https://cdn.example.com/test-bucket/threads/" in result
+    assert "https://cdn.example.com/threads/" in result

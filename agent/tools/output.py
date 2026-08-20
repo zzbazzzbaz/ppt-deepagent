@@ -91,7 +91,6 @@ def _output_id(now: datetime) -> str:
 
 def _public_url(
     public_base_url: str,
-    bucket: str,
     thread_id: str,
     output_id: str,
     relative_path: PurePosixPath,
@@ -105,7 +104,7 @@ def _public_url(
             *(quote(part) for part in relative_path.parts),
         )
     )
-    return f"{public_base_url.rstrip('/')}/{bucket}/{object_key}"
+    return f"{public_base_url.rstrip('/')}/{object_key}"
 
 
 async def _publish_pptx_files(
@@ -162,7 +161,6 @@ def create_save_output_tool(
         if public_base_url is not None
         else minio_settings.public_base_url
     )
-    bucket = minio_settings.bucket
 
     @tool(
         "save_output",
@@ -185,7 +183,7 @@ def create_save_output_tool(
         await _publish_pptx_files(backend, output_id, pptx_files)
 
         urls = [
-            _public_url(base_url, bucket, thread_id, output_id, relative_path)
+            _public_url(base_url, thread_id, output_id, relative_path)
             for relative_path in pptx_files
         ]
         lines = [f"已发布 {len(pptx_files)} 个 PPTX 到 /workspace/output/{output_id}/："]
