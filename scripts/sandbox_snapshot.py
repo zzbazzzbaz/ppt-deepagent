@@ -5,11 +5,14 @@ import shutil
 import tempfile
 import time
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from deepagents.backends.langsmith import LangSmithSandbox
 from langsmith.sandbox import SandboxClient, SandboxClientError, Snapshot
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from agent.snapshot import find_ready_snapshot
 
@@ -34,6 +37,24 @@ pptx.writeFile({ fileName: '/workspace/work/original.pptx' });
 """
 
 
+@dataclass(frozen=True)
+class SnapshotSyncResult:
+    action: Literal["created", "updated", "skipped"]
+    snapshot: Snapshot
+
+
+class _SnapshotCliSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env", env_prefix="LANGSMITH_", extra="ignore"
+    )
+
+    api_key: str
+
+
+def _snapshot_api_key(*, _env_file: str | None = ".env") -> str:
+    return _SnapshotCliSettings(_env_file=_env_file).api_key
+
+
 def _project_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -52,6 +73,19 @@ def _delete_failed_snapshots(client: SandboxClient, name: str) -> None:
             continue
         client.delete_snapshot(snapshot.id)
         print(f"Deleted failed snapshot {snapshot.name} ({snapshot.id})")
+
+
+def _find_snapshot(client: SandboxClient, name: str) -> Snapshot | None:
+    matches = [
+        snapshot
+        for snapshot in client.list_snapshots(name_contains=name)
+        if snapshot.name == name
+    ]
+    if len(matches) > 1:
+        raise RuntimeError(
+            f"Expected at most one snapshot named {name!r}, found {len(matches)}"
+        )
+    return matches[0] if matches else None
 
 
 def build_snapshot(client: SandboxClient, name: str, project_root: Path) -> Snapshot:
@@ -208,19 +242,63 @@ def create_snapshot_from_image(
     )
 
 
-def main() -> None:
-    from agent.settings import langsmith_settings
+def sync_snapshot_from_image(
+    client: SandboxClient,
+    latest_name: str,
+    candidate_name: str,
+    docker_image: str,
+    image_digest: str,
+) -> SnapshotSyncResult:
+    existing = _find_snapshot(client, latest_name)
+    if (
+        existing is not None
+        and existing.status == "ready"
+        and existing.image_digest == image_digest
+    ):
+        return SnapshotSyncResult("skipped", existing)
 
+    if _find_snapshot(client, candidate_name) is not None:
+        raise RuntimeError(f"Candidate snapshot already exists: {candidate_name!r}")
+
+    candidate = create_snapshot_from_image(client, candidate_name, docker_image)
+    try:
+        verify_snapshot(client, candidate_name)
+    except Exception:
+        client.delete_snapshot(candidate.id)
+        raise
+
+    if existing is not None:
+        raise NotImplementedError("Latest cutover is completed in Task 4")
+
+    latest = create_snapshot_from_image(client, latest_name, docker_image)
+    verify_snapshot(client, latest_name)
+    client.delete_snapshot(candidate.id)
+    return SnapshotSyncResult("created", latest)
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Build, verify, or create from image the PPTX Sandbox snapshot."
+        description="Build, verify, or synchronize the PPTX Sandbox snapshot."
     )
-    parser.add_argument("command", choices=("build", "verify", "from-image"))
+    parser.add_argument(
+        "command", choices=("build", "verify", "from-image", "sync-image")
+    )
     parser.add_argument("--name", required=True)
-    parser.add_argument("--docker-image", help="Docker image reference (required for from-image)")
-    parser.add_argument("--registry-id", help="Optional private registry ID for from-image")
+    parser.add_argument(
+        "--docker-image", help="Docker image reference (required for from-image)"
+    )
+    parser.add_argument(
+        "--registry-id", help="Optional private registry ID for from-image"
+    )
+    parser.add_argument(
+        "--candidate-name", help="Candidate snapshot name (required for sync-image)"
+    )
+    parser.add_argument(
+        "--image-digest", help="Immutable image digest (required for sync-image)"
+    )
     args = parser.parse_args()
 
-    client = SandboxClient(api_key=langsmith_settings.api_key)
+    client = SandboxClient(api_key=_snapshot_api_key())
     try:
         if args.command == "build":
             snapshot = build_snapshot(client, args.name, _project_root())
@@ -237,6 +315,26 @@ def main() -> None:
             print(
                 f"Snapshot created from image: {snapshot.name} ({snapshot.id}) "
                 f"[{snapshot.status}] image={snapshot.docker_image} digest={snapshot.image_digest}"
+            )
+        elif args.command == "sync-image":
+            if not args.docker_image:
+                parser.error("--docker-image is required for sync-image")
+            if not args.candidate_name:
+                parser.error("--candidate-name is required for sync-image")
+            if not args.image_digest:
+                parser.error("--image-digest is required for sync-image")
+            result = sync_snapshot_from_image(
+                client,
+                latest_name=args.name,
+                candidate_name=args.candidate_name,
+                docker_image=args.docker_image,
+                image_digest=args.image_digest,
+            )
+            print(
+                f"Snapshot sync {result.action}: {result.snapshot.name} "
+                f"({result.snapshot.id}) [{result.snapshot.status}] "
+                f"image={result.snapshot.docker_image} "
+                f"digest={result.snapshot.image_digest}"
             )
         else:
             verify_snapshot(client, args.name)

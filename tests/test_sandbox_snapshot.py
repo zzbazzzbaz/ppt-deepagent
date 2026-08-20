@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -8,9 +9,13 @@ from unittest.mock import Mock, patch
 import pytest
 
 from scripts.sandbox_snapshot import (
+    SnapshotSyncResult,
+    _find_snapshot,
+    _snapshot_api_key,
     build_snapshot,
     create_snapshot_from_image,
     prepare_build_context,
+    sync_snapshot_from_image,
     verify_snapshot,
 )
 
@@ -220,3 +225,97 @@ def test_create_from_image_passes_registry_id_when_provided() -> None:
     )
 
     assert client.create_snapshot.call_args.kwargs["registry_id"] == "registry-1"
+
+
+def test_find_snapshot_requires_at_most_one_exact_name() -> None:
+    """Catches ambiguous latest lookups silently picking the wrong snapshot."""
+    client = Mock()
+    client.list_snapshots.return_value = [
+        SimpleNamespace(id="one", name="latest", status="ready"),
+        SimpleNamespace(id="two", name="latest", status="ready"),
+    ]
+
+    with pytest.raises(RuntimeError, match="Expected at most one"):
+        _find_snapshot(client, "latest")
+
+
+def test_snapshot_api_key_reads_only_langsmith_configuration() -> None:
+    """Catches the CLI pulling unrelated model secrets into CI."""
+    with patch.dict(os.environ, {"LANGSMITH_API_KEY": "ci-key"}, clear=True):
+        assert _snapshot_api_key(_env_file=None) == "ci-key"
+
+
+def test_sync_skips_when_latest_digest_matches() -> None:
+    """Catches redundant candidate builds for unchanged images."""
+    existing = SimpleNamespace(
+        id="latest-id",
+        name="ppt-deepagent-sandbox-latest",
+        status="ready",
+        image_digest="sha256:new",
+        docker_image="ghcr.io/zzbazzzbaz/ppt-deepagent:old",
+    )
+    client = Mock()
+    client.list_snapshots.return_value = [existing]
+
+    result = sync_snapshot_from_image(
+        client,
+        latest_name=existing.name,
+        candidate_name="candidate",
+        docker_image="ghcr.io/zzbazzzbaz/ppt-deepagent:ppt-deepagent-sandbox-20260820-010203",
+        image_digest="sha256:new",
+    )
+
+    assert result == SnapshotSyncResult(action="skipped", snapshot=existing)
+    client.create_snapshot.assert_not_called()
+    client.delete_snapshot.assert_not_called()
+
+
+def test_sync_creates_latest_when_missing() -> None:
+    """Catches the first pipeline run failing instead of bootstrapping latest."""
+    image = "ghcr.io/zzbazzzbaz/ppt-deepagent:ppt-deepagent-sandbox-20260820-010203"
+    client = Mock()
+    client.list_snapshots.return_value = []
+    client.create_snapshot.side_effect = [
+        SimpleNamespace(
+            id="candidate-id",
+            name="ppt-deepagent-sandbox-candidate-20260820-010203",
+            status="ready",
+            image_digest="sha256:new",
+            docker_image=image,
+        ),
+        SimpleNamespace(
+            id="latest-id",
+            name="ppt-deepagent-sandbox-latest",
+            status="ready",
+            image_digest="sha256:new",
+            docker_image=image,
+        ),
+    ]
+
+    with patch("scripts.sandbox_snapshot.verify_snapshot") as verify:
+        manager = Mock()
+        manager.attach_mock(verify, "verify")
+        manager.attach_mock(client.create_snapshot, "create_snapshot")
+        manager.attach_mock(client.delete_snapshot, "delete_snapshot")
+        result = sync_snapshot_from_image(
+            client,
+            latest_name="ppt-deepagent-sandbox-latest",
+            candidate_name="ppt-deepagent-sandbox-candidate-20260820-010203",
+            docker_image=image,
+            image_digest="sha256:new",
+        )
+
+    assert result.action == "created"
+    assert result.snapshot.id == "latest-id"
+    assert result.snapshot.docker_image == image
+    latest_call = client.create_snapshot.call_args_list[-1]
+    assert latest_call.args[0] == "ppt-deepagent-sandbox-latest"
+    assert latest_call.kwargs["docker_image"] == image
+    assert [call[0] for call in manager.mock_calls] == [
+        "create_snapshot",
+        "verify",
+        "create_snapshot",
+        "verify",
+        "delete_snapshot",
+    ]
+    client.delete_snapshot.assert_called_once_with("candidate-id")
