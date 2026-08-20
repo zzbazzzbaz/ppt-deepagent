@@ -134,10 +134,10 @@ def test_creates_thread_sandbox_with_minio_mounts(client: Mock) -> None:
     }
     mounts = {mount["id"]: mount for mount in mount_config["mounts"]}
     expected = {
-        "skills": ("/skills", "skills", True),
-        "input": ("/workspace/input", f"threads/{THREAD_ID}/input", True),
-        "work": ("/workspace/work", f"threads/{THREAD_ID}/work", False),
-        "output": ("/workspace/output", f"threads/{THREAD_ID}/output", False),
+        "skills": ("/mnt/mounts/skills", "skills", True),
+        "input": ("/mnt/mounts/input", f"threads/{THREAD_ID}/input", True),
+        "work": ("/mnt/mounts/work", f"threads/{THREAD_ID}/work", False),
+        "output": ("/mnt/mounts/output", f"threads/{THREAD_ID}/output", False),
     }
     assert set(mounts) == set(expected)
     for mount_id, (mount_path, prefix, read_only) in expected.items():

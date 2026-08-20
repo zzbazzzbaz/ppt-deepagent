@@ -44,7 +44,7 @@ def _thread_mount_config(thread_id: str) -> SandboxMountConfig:
         mounts=[
             s3_mount(
                 id="skills",
-                mount_path="/skills",
+                mount_path="/mnt/mounts/skills",
                 bucket=minio_settings.bucket,
                 prefix="skills",
                 region=minio_settings.region,
@@ -54,7 +54,7 @@ def _thread_mount_config(thread_id: str) -> SandboxMountConfig:
             ),
             s3_mount(
                 id="input",
-                mount_path="/workspace/input",
+                mount_path="/mnt/mounts/input",
                 bucket=minio_settings.bucket,
                 prefix=f"{prefix}/input",
                 region=minio_settings.region,
@@ -64,7 +64,7 @@ def _thread_mount_config(thread_id: str) -> SandboxMountConfig:
             ),
             s3_mount(
                 id="work",
-                mount_path="/workspace/work",
+                mount_path="/mnt/mounts/work",
                 bucket=minio_settings.bucket,
                 prefix=f"{prefix}/work",
                 region=minio_settings.region,
@@ -74,7 +74,7 @@ def _thread_mount_config(thread_id: str) -> SandboxMountConfig:
             ),
             s3_mount(
                 id="output",
-                mount_path="/workspace/output",
+                mount_path="/mnt/mounts/output",
                 bucket=minio_settings.bucket,
                 prefix=f"{prefix}/output",
                 region=minio_settings.region,
