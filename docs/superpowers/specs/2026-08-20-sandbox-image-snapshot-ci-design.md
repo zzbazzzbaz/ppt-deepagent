@@ -2,7 +2,25 @@
 
 ## 状态
 
-已批准，待实施。
+已实施，验收通过（2026-08-20）。
+
+## 验收记录
+
+- Workflow 运行：<https://github.com/zzbazzzbaz/ppt-deepagent/actions/runs/32320809357>（push 自动触发，9m34s，全部步骤成功）
+- 时间戳镜像：`ghcr.io/zzbazzzbaz/ppt-deepagent:ppt-deepagent-sandbox-20260820-012314`
+- immutable digest：`sha256:b3ec852eeb0ff306511820ddb882ebc3345dbda382bdc0ca70e5f5eaeaceb6dd`
+- latest Snapshot：`ppt-deepagent-sandbox-latest`（ID `105284c8-3be4-4303-b6f3-67e7b42e64a4`，ready，fs 容量 2147483648 = 2 GiB）
+- 同步动作：`created`（首次运行，无既有 latest）；本地完整验证矩阵复验通过
+- E2E LangSmith trace：`01a01cd2-4e9f-7c81-bd7d-411206e1e00d`
+- 本地 PPTX 产物：`workspace/01a01cd1-b2d6-7f03-97e8-b967ccdd471d/output/20260820-094212/editable-deck.pptx`
+- 清理确认：遗留 Snapshot `ppt-deepagent-pptx-v1` 已删除（释放占用 Sandbox 后）；candidate Snapshot 已删除；所有 verify Sandbox 与 E2E thread Sandbox 均已删除；LangSmith 仅保留 `ppt-deepagent-sandbox-latest`；日志未泄露 API key（`LANGSMITH_API_KEY` 显示为 `***`）
+- 本地回归：54 tests passed、`ruff check .` 通过、`langgraph validate` 1 graph
+
+实施偏差（均已通过测试契约锁定）：
+
+1. Task 5 workflow 双 tag 使用 `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ppt-deepagent-sandbox-${{ steps.metadata.outputs.timestamp }}` 表达式构造（而非计划 Step 4 示例的 `timestamp_image` 输出），以落实 Step 1 契约测试要求的字面量。
+2. Task 4 追加 `test_sync_deletes_unverified_latest_before_rollback`，覆盖本设计"失败与回滚"中"删除失败的新 latest Snapshot"分支。
+
 
 ## 目标
 

@@ -57,7 +57,7 @@
 - Preserves runtime: `/opt/pptx/node_modules` and `/workspace/node_modules` resolve all required packages.
 - Preserves build command: `npm ci --omit=dev --ignore-scripts` followed by `npm rebuild sharp`.
 
-- [ ] **Step 1: Replace the current Docker/package assertions with failing Node 22 assertions**
+- [x] **Step 1: Replace the current Docker/package assertions with failing Node 22 assertions**
 
 Update `tests/test_sandbox_snapshot.py`:
 
@@ -87,7 +87,7 @@ def test_package_and_lock_pin_node_22_compatible_sharp() -> None:
     assert lock["packages"]["node_modules/sharp"]["version"] == "0.35.3"
 ```
 
-- [ ] **Step 2: Run the focused tests and confirm they fail**
+- [x] **Step 2: Run the focused tests and confirm they fail**
 
 Run:
 
@@ -97,7 +97,7 @@ uv run pytest tests/test_sandbox_snapshot.py::test_dockerfile_uses_pinned_node_2
 
 Expected: FAIL because the Dockerfile installs Debian Node 18 and Sharp is `0.33.5`.
 
-- [ ] **Step 3: Implement the pinned Node 22 multi-stage runtime**
+- [x] **Step 3: Implement the pinned Node 22 multi-stage runtime**
 
 Make the beginning and Node-copy portion of `sandbox/Dockerfile` exactly follow this structure:
 
@@ -135,7 +135,7 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 
 Keep the Python requirements, npm install, Skill copy, `/workspace/node_modules` link and final workdir blocks unchanged.
 
-- [ ] **Step 4: Update Sharp and regenerate the lockfile through the configured proxy**
+- [x] **Step 4: Update Sharp and regenerate the lockfile through the configured proxy**
 
 Change `sandbox/package.json` to:
 
@@ -151,7 +151,7 @@ npm_config_proxy=http://127.0.0.1:7897 npm_config_https_proxy=http://127.0.0.1:7
 
 Expected: exit 0; root and `node_modules/sharp` lock entries both report `0.35.3`.
 
-- [ ] **Step 5: Run focused tests and lockfile integrity checks**
+- [x] **Step 5: Run focused tests and lockfile integrity checks**
 
 Run:
 
@@ -164,7 +164,7 @@ git diff --check
 
 Expected: tests and Ruff pass; npm reports package and lock are in sync.
 
-- [ ] **Step 6: Commit the runtime update**
+- [x] **Step 6: Commit the runtime update**
 
 ```bash
 git add sandbox/Dockerfile sandbox/package.json sandbox/package-lock.json tests/test_sandbox_snapshot.py
@@ -189,7 +189,7 @@ git commit -m "build: pin sandbox Node runtime"
 - Produces constant: `_SANDBOX_MEM_BYTES = 2 * 1024**3`.
 - Changes `verify_snapshot(client: SandboxClient, name: str) -> None` to create verify Sandbox with `mem_bytes=_SANDBOX_MEM_BYTES`.
 
-- [ ] **Step 1: Write failing Thread Sandbox memory tests**
+- [x] **Step 1: Write failing Thread Sandbox memory tests**
 
 Add `"SANDBOX_MEM_BYTES": str(2 * 1024**3)` to `_TEST_ENV` and `mem_bytes=2 * 1024**3` to the `sandbox_settings` stub in `tests/test_sandbox.py`. Update the creation assertion:
 
@@ -203,7 +203,7 @@ client.create_sandbox.assert_called_once_with(
 )
 ```
 
-- [ ] **Step 2: Write failing 2 GiB Snapshot and verify Sandbox tests**
+- [x] **Step 2: Write failing 2 GiB Snapshot and verify Sandbox tests**
 
 Update capacity assertions in `tests/test_sandbox_snapshot.py` from `8 * 1024**3` to `2 * 1024**3`. Extend the verify assertion:
 
@@ -216,7 +216,7 @@ client.create_sandbox.assert_called_once_with(
 )
 ```
 
-- [ ] **Step 3: Run the focused tests and confirm resource assertions fail**
+- [x] **Step 3: Run the focused tests and confirm resource assertions fail**
 
 Run:
 
@@ -226,7 +226,7 @@ uv run pytest tests/test_sandbox.py tests/test_sandbox_snapshot.py -q
 
 Expected: FAIL because `mem_bytes` is absent and snapshot capacity remains 8 GiB.
 
-- [ ] **Step 4: Implement the resource configuration**
+- [x] **Step 4: Implement the resource configuration**
 
 Add to `SandboxSettings`:
 
@@ -271,7 +271,7 @@ SANDBOX_SNAPSHOT_NAME=ppt-deepagent-sandbox-latest
 SANDBOX_MEM_BYTES=2147483648
 ```
 
-- [ ] **Step 5: Run resource tests and static checks**
+- [x] **Step 5: Run resource tests and static checks**
 
 Run:
 
@@ -284,7 +284,7 @@ git diff --check
 
 Expected: all tests pass and LangGraph finds one graph.
 
-- [ ] **Step 6: Commit the resource limits**
+- [x] **Step 6: Commit the resource limits**
 
 ```bash
 git add .env.example agent/settings.py agent/sandbox.py scripts/sandbox_snapshot.py tests/test_sandbox.py tests/test_sandbox_snapshot.py
@@ -306,7 +306,7 @@ git commit -m "feat: limit sandbox runtime resources"
 - Produces: `sync_snapshot_from_image(client: SandboxClient, latest_name: str, candidate_name: str, docker_image: str, image_digest: str) -> SnapshotSyncResult`.
 - Preserves: `build`, `from-image`, and `verify` CLI commands.
 
-- [ ] **Step 1: Write failing exact lookup, credential isolation, skip and first-create tests**
+- [x] **Step 1: Write failing exact lookup, credential isolation, skip and first-create tests**
 
 Add imports and tests to `tests/test_sandbox_snapshot.py`:
 
@@ -361,7 +361,7 @@ def test_sync_skips_when_latest_digest_matches() -> None:
 
 For first-create behavior, mock `create_snapshot` to return candidate then latest, patch `verify_snapshot`, and assert result action is `created`, latest uses the timestamp image, and candidate is deleted only after latest verification.
 
-- [ ] **Step 2: Run the new tests and confirm imports or behavior fail**
+- [x] **Step 2: Run the new tests and confirm imports or behavior fail**
 
 Run:
 
@@ -371,7 +371,7 @@ uv run pytest tests/test_sandbox_snapshot.py -q
 
 Expected: FAIL because the sync result, lookup, minimal credential loader and sync function do not exist.
 
-- [ ] **Step 3: Implement the sync result, exact lookup and isolated credential loader**
+- [x] **Step 3: Implement the sync result, exact lookup and isolated credential loader**
 
 Add:
 
@@ -415,7 +415,7 @@ def _find_snapshot(client: SandboxClient, name: str) -> Snapshot | None:
 
 Remove the unused `os` import if the final implementation does not reference it directly.
 
-- [ ] **Step 4: Implement digest skip and candidate-first creation**
+- [x] **Step 4: Implement digest skip and candidate-first creation**
 
 Implement `sync_snapshot_from_image()` with this ordering:
 
@@ -439,7 +439,7 @@ except Exception:
 
 For the first-create path, create latest from the same immutable timestamp image, verify it, delete candidate, and return `SnapshotSyncResult("created", latest)`.
 
-- [ ] **Step 5: Extend the CLI parser with `sync-image`**
+- [x] **Step 5: Extend the CLI parser with `sync-image`**
 
 Add command choice and arguments:
 
@@ -459,7 +459,7 @@ client = SandboxClient(api_key=_snapshot_api_key())
 
 Do not import `agent.settings` in `main()`.
 
-- [ ] **Step 6: Run focused tests and static checks**
+- [x] **Step 6: Run focused tests and static checks**
 
 Run:
 
@@ -471,7 +471,7 @@ git diff --check
 
 Expected: skip and first-create tests pass; existing commands remain covered.
 
-- [ ] **Step 7: Commit the sync foundation**
+- [x] **Step 7: Commit the sync foundation**
 
 ```bash
 git add scripts/sandbox_snapshot.py tests/test_sandbox_snapshot.py
@@ -491,7 +491,7 @@ git commit -m "feat: add snapshot image synchronization"
 - Preserves: old latest until candidate verification succeeds.
 - Guarantees: successful run leaves only latest; candidate verification failure leaves old latest unchanged; cutover failure restores old latest when an old immutable image exists.
 
-- [ ] **Step 1: Write failing successful replacement test**
+- [x] **Step 1: Write failing successful replacement test**
 
 Create a ready old latest with `docker_image="ghcr.io/zzbazzzbaz/ppt-deepagent:ppt-deepagent-sandbox-20260819-010203"` and different digest. Mock candidate and new latest creation. Assert exact call order:
 
@@ -507,15 +507,15 @@ assert events == [
 assert result.action == "updated"
 ```
 
-- [ ] **Step 2: Write failing candidate failure isolation test**
+- [x] **Step 2: Write failing candidate failure isolation test**
 
 Patch `verify_snapshot` to fail for candidate. Assert candidate is deleted, old latest ID is never deleted, and latest is never recreated.
 
-- [ ] **Step 3: Write failing cutover rollback tests**
+- [x] **Step 3: Write failing cutover rollback tests**
 
 Simulate candidate success, old latest deletion, and new latest creation failure. Assert the script recreates latest from the old timestamp image, verifies rollback, deletes candidate, and raises the original release failure. Add a second test where rollback also fails; assert candidate is retained and the raised error contains both release and rollback failure text.
 
-- [ ] **Step 4: Run rollback tests and confirm they fail**
+- [x] **Step 4: Run rollback tests and confirm they fail**
 
 Run:
 
@@ -525,7 +525,7 @@ uv run pytest tests/test_sandbox_snapshot.py -q
 
 Expected: FAIL because existing latest replacement and rollback are not implemented.
 
-- [ ] **Step 5: Implement replacement and rollback**
+- [x] **Step 5: Implement replacement and rollback**
 
 After candidate verification:
 
@@ -561,7 +561,7 @@ else:
 
 Use helper functions to record or assert call order in tests; do not add logging callbacks or a general event framework to production code.
 
-- [ ] **Step 6: Run all Snapshot tests and static checks**
+- [x] **Step 6: Run all Snapshot tests and static checks**
 
 Run:
 
@@ -573,7 +573,7 @@ git diff --check
 
 Expected: all candidate, replacement and rollback branches pass.
 
-- [ ] **Step 7: Commit the cutover state machine**
+- [x] **Step 7: Commit the cutover state machine**
 
 ```bash
 git add scripts/sandbox_snapshot.py tests/test_sandbox_snapshot.py
@@ -594,7 +594,7 @@ git commit -m "feat: safely replace latest snapshot"
 - Produces image tags: `ppt-deepagent-sandbox-<timestamp>` and `ppt-deepagent-sandbox-latest`.
 - Produces concurrency group: `ppt-deepagent-sandbox-snapshot-sync` with `cancel-in-progress: false`.
 
-- [ ] **Step 1: Write failing workflow contract tests**
+- [x] **Step 1: Write failing workflow contract tests**
 
 Create `tests/test_sandbox_workflow.py`:
 
@@ -640,7 +640,7 @@ def test_workflow_pushes_dual_tags_and_syncs_digest() -> None:
         assert required in text
 ```
 
-- [ ] **Step 2: Run workflow tests and confirm they fail**
+- [x] **Step 2: Run workflow tests and confirm they fail**
 
 Run:
 
@@ -650,7 +650,7 @@ uv run pytest tests/test_sandbox_workflow.py -q
 
 Expected: FAIL because the current workflow is manual-only and accepts a free-form version input.
 
-- [ ] **Step 3: Add push paths and concurrency**
+- [x] **Step 3: Add push paths and concurrency**
 
 Use this trigger/concurrency structure:
 
@@ -672,7 +672,7 @@ concurrency:
 
 Remove the `version` workflow input.
 
-- [ ] **Step 4: Generate timestamp metadata and dual image tags**
+- [x] **Step 4: Generate timestamp metadata and dual image tags**
 
 Add after checkout:
 
@@ -695,7 +695,7 @@ tags: |
   ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ppt-deepagent-sandbox-latest
 ```
 
-- [ ] **Step 5: Install uv dependencies and call snapshot synchronization**
+- [x] **Step 5: Install uv dependencies and call snapshot synchronization**
 
 Add after image push:
 
@@ -719,7 +719,7 @@ Add after image push:
       --image-digest "${{ steps.build.outputs.digest }}"
 ```
 
-- [ ] **Step 6: Run workflow tests, full local regression and YAML whitespace checks**
+- [x] **Step 6: Run workflow tests, full local regression and YAML whitespace checks**
 
 Run:
 
@@ -733,7 +733,7 @@ git diff --check
 
 Expected: all tests pass; LangGraph validates one graph.
 
-- [ ] **Step 7: Commit the workflow**
+- [x] **Step 7: Commit the workflow**
 
 ```bash
 git add .github/workflows/build-sandbox-image.yml tests/test_sandbox_workflow.py
@@ -755,7 +755,7 @@ git commit -m "ci: sync latest sandbox snapshot"
 - Produces ready Snapshot: `ppt-deepagent-sandbox-latest` with 2 GiB filesystem capacity.
 - Produces local E2E PPTX under `workspace/<thread_id>/output/<timestamp>/`.
 
-- [ ] **Step 1: Verify GitHub Secret and push implementation commits**
+- [x] **Step 1: Verify GitHub Secret and push implementation commits**
 
 Run:
 
@@ -768,7 +768,7 @@ git push origin main
 
 Expected: Secret exists; only untracked `workspace/` artifacts remain; push succeeds without force.
 
-- [ ] **Step 2: Observe the automatically triggered workflow**
+- [x] **Step 2: Observe the automatically triggered workflow**
 
 Run:
 
@@ -779,7 +779,7 @@ gh run watch "$(gh run list --workflow build-sandbox-image.yml --limit 1 --json 
 
 Expected: build, push, candidate verify, latest switch and candidate cleanup all succeed.
 
-- [ ] **Step 3: Inspect workflow logs and assert immutable outputs**
+- [x] **Step 3: Inspect workflow logs and assert immutable outputs**
 
 Run:
 
@@ -790,7 +790,7 @@ gh run view "$run_id" --log
 
 Confirm logs contain a UTC timestamp image, a `sha256:` digest, `ppt-deepagent-sandbox-latest`, a ready Snapshot ID and successful verification. Confirm logs do not contain the LangSmith API key.
 
-- [ ] **Step 4: Verify the latest Snapshot and 2 GiB resource contract from LangSmith**
+- [x] **Step 4: Verify the latest Snapshot and 2 GiB resource contract from LangSmith**
 
 Run:
 
@@ -813,7 +813,7 @@ PY
 
 Expected: full PPTX toolchain passes and capacity prints `2147483648`.
 
-- [ ] **Step 5: Update local runtime configuration and perform one-time legacy cleanup**
+- [x] **Step 5: Update local runtime configuration and perform one-time legacy cleanup**
 
 Change local `.env` without committing:
 
@@ -824,7 +824,7 @@ SANDBOX_MEM_BYTES=2147483648
 
 After verifying the new latest Snapshot, delete the legacy exact-name Snapshot `ppt-deepagent-pptx-v1` through `SandboxClient.delete_snapshot()`. Refuse deletion unless exactly one matching legacy Snapshot exists and the new latest Snapshot is ready.
 
-- [ ] **Step 6: Run the real PPTX E2E smoke against a restarted server**
+- [x] **Step 6: Run the real PPTX E2E smoke against a restarted server**
 
 Start in a persistent terminal:
 
@@ -840,7 +840,7 @@ uv run python -m scripts.smoke_pptx_e2e
 
 Expected: outline approval, three-page editable PPTX generation, 1-3 successful `view` calls, successful `save_output`, a LangSmith trace ID, and a local timestamped PPTX.
 
-- [ ] **Step 7: Verify final remote resource and local artifact state**
+- [x] **Step 7: Verify final remote resource and local artifact state**
 
 Run:
 
@@ -855,7 +855,7 @@ git status --short
 
 Expected: at least one PPTX path prints; tests, Ruff and LangGraph pass; `git status` contains only expected document changes and untracked E2E workspace artifacts.
 
-- [ ] **Step 8: Record real acceptance evidence**
+- [x] **Step 8: Record real acceptance evidence**
 
 Update the design status to implemented and append:
 
