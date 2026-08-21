@@ -36,20 +36,24 @@ save_output 上传 MinIO 并返回下载链接 → sync(upload) 回传工作产�
 ```
 agent/
 ├── agent.py          # graph() 入口：按 thread_id 组装 deep agent（langgraph.json 注册）
-├── model.py          # DeepSeek 主模型 + Qwen 视觉模型
-├── sandbox.py        # LangSmith Sandbox 的创建 / 复用 / 等待就绪
-├── snapshot.py       # 查找就绪的快照
-├── storage.py        # MinIO（S3 协议）封装，工具层不直接操作 boto3
-├── settings.py       # pydantic-settings 读取 .env
+├── settings.py       # pydantic-settings 读取 .env（全局配置中心）
+├── infra/            # 基础设施：外部服务访问，统一经 agent.infra 导入
+│   ├── __init__.py   # 包级对外 API（__all__）：模型、沙箱、快照、存储
+│   ├── model.py      # DeepSeek 主模型 + Qwen 视觉模型单例
+│   ├── sandbox.py    # LangSmith Sandbox 的创建 / 复用 / 等待就绪
+│   ├── snapshot.py   # 查找就绪的快照
+│   └── storage.py    # MinIO（S3 协议）封装，工具层不直接操作 boto3
 ├── prompts/
 │   └── presentation_planner.py   # 系统提示词：审批前出大纲 → 审批后生成/校验/保存
 ├── skills/pptx/      # 演示文稿生成技能（SKILL.md + scripts）
 │   └── scripts/office/           # validate.py（OOXML 校验）、soffice.py（PDF 转换）
-└── tools/
+└── tools/            # 工具层，统一经 agent.tools 导入
+    ├── __init__.py   # 包级对外 API（__all__）：submit_outline + 3 个工具工厂
     ├── outline.py    # submit_outline：提交大纲，触发人工审批中断
     ├── sync.py       # sync：MinIO ↔ Sandbox 双向同步
     ├── view.py       # view：图片交给 Qwen 视觉模型检查
-    └── output.py     # save_output：校验全部 PPTX 后上传 MinIO 并返回链接
+    ├── output.py     # save_output：校验全部 PPTX 后上传 MinIO 并返回链接
+    └── _workspace.py # 工具间共享实现（私有）：工作目录列举、符号链接防护
 sandbox/              # Sandbox 镜像（Dockerfile、依赖）
 scripts/              # 冒烟测试、快照同步等运维脚本
 tests/                # pytest 测试
@@ -75,5 +79,5 @@ uv run python -m scripts.smoke_pptx_e2e
 ```
 
 ```shell
-https://agentchat.vercel.app/?apiUrl=https://ppt-deepagent.gqt.plus&assistantId=agent&apiKey=<langsmith api key>
+https://agentchat.vercel.app/?apiUrl=https://agent.gqt.plus&assistantId=agent&apiKey=<langsmith api key>
 ```
