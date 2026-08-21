@@ -1,3 +1,5 @@
+"""view：把渲染出的幻灯片页面图片交给视觉模型，返回设计质量报告。"""
+
 from __future__ import annotations
 
 import base64
@@ -23,11 +25,14 @@ class ViewInput(BaseModel):
 
     image_paths: list[str] = Field(
         min_length=1,
-        description="当前 Sandbox 中待查看图片的绝对路径列表。",
+        description="待检查图片的绝对路径列表，通常是渲染出的每页幻灯片。",
     )
     prompt: str = Field(
         min_length=1,
-        description="视觉分析任务、演示背景和需要重点回答的问题。",
+        description=(
+            "检查任务说明：演示背景与需要重点确认的问题，"
+            "如版式、溢出、重叠、可读性、视觉层级与整体一致性。"
+        ),
     )
 
     @field_validator("image_paths")
@@ -49,15 +54,16 @@ def create_view_tool(
     @tool(
         "view",
         args_schema=ViewInput,
-        description="读取 Sandbox 中的图片并返回视觉设计或质量检查报告。",
+        description=(
+            "把幻灯片页面图片交给视觉模型检查，返回版式、溢出、重叠、"
+            "可读性、视觉层级与整稿一致性报告。"
+        ),
     )
     async def view(image_paths: list[str], prompt: str) -> str:
         try:
             responses = await backend.adownload_files(image_paths)
         except Exception as exc:
-            raise ToolException(
-                f"图片读取失败：{type(exc).__name__}: {exc}"
-            ) from exc
+            raise ToolException(f"图片读取失败：{type(exc).__name__}: {exc}") from exc
         if len(responses) != len(image_paths):
             raise ToolException("图片下载结果数量与请求数量不一致。")
 

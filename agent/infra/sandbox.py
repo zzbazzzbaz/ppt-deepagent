@@ -10,8 +10,8 @@ from langsmith.sandbox import (
     SandboxClientError,
 )
 
+from agent.infra.snapshot import find_ready_snapshot
 from agent.settings import langsmith_settings, sandbox_settings
-from agent.snapshot import find_ready_snapshot
 
 _client = SandboxClient(api_key=langsmith_settings.api_key)
 

@@ -63,8 +63,13 @@ def _validate_editable_pptx(path: Path, required_text: str) -> None:
                 if name.startswith("ppt/slides/slide") and name.endswith(".xml")
             )
             if len(slides) != 3:
-                raise RuntimeError(f"Expected exactly three slides, got {len(slides)}: {path}")
-            slide_xml = [archive.read(slide).decode("utf-8", errors="replace") for slide in slides]
+                raise RuntimeError(
+                    f"Expected exactly three slides, got {len(slides)}: {path}"
+                )
+            slide_xml = [
+                archive.read(slide).decode("utf-8", errors="replace")
+                for slide in slides
+            ]
     except zipfile.BadZipFile as exc:
         raise RuntimeError(f"PPTX is not a readable ZIP file: {path}") from exc
 
@@ -214,13 +219,13 @@ def _assert_minio_artifacts(
     if not output_pptx:
         raise RuntimeError("MinIO thread prefix is missing published PPTX files")
     output_ids = sorted(
-        {key[len(thread_prefix):].split("/", 1)[0] for key in output_pptx}
+        {key[len(thread_prefix) :].split("/", 1)[0] for key in output_pptx}
     )
     latest_id = output_ids[-1]
     latest_pptx = [
         key
         for key in output_pptx
-        if key[len(thread_prefix):].startswith(f"{latest_id}/")
+        if key[len(thread_prefix) :].startswith(f"{latest_id}/")
     ]
     latest_key = latest_pptx[-1]
     body = s3.get_object(Bucket=bucket, Key=latest_key)["Body"].read()
@@ -240,7 +245,7 @@ def _download_and_validate(url: str, required_text: str) -> None:
 
 
 async def _run_smoke() -> None:
-    from agent.sandbox import get_thread_sandbox_backend, sandbox_name_for_thread
+    from agent.infra import get_thread_sandbox_backend, sandbox_name_for_thread
     from agent.settings import (
         deepseek_settings,
         langsmith_settings,
@@ -293,13 +298,17 @@ async def _run_smoke() -> None:
             metadata={"smoke_id": smoke_id},
         )
         if resumed.get("__interrupt__"):
-            raise RuntimeError(f"Run interrupted after approval: {resumed['__interrupt__']!r}")
+            raise RuntimeError(
+                f"Run interrupted after approval: {resumed['__interrupt__']!r}"
+            )
         messages = resumed.get("messages")
         if not isinstance(messages, list):
             raise RuntimeError("Resumed run returned no messages")
         view_calls = _tool_calls(messages, "view")
         if not 1 <= len(view_calls) <= 3:
-            raise RuntimeError(f"Expected 1-3 view calls after approval, got {len(view_calls)}")
+            raise RuntimeError(
+                f"Expected 1-3 view calls after approval, got {len(view_calls)}"
+            )
         _assert_successful_tool_message(messages, "save_output")
 
         _assert_minio_artifacts(s3, minio_settings.bucket, thread_id, _REQUIRED_TEXT)
@@ -331,7 +340,9 @@ async def _run_smoke() -> None:
         except Exception as exc:
             cleanup_errors.append(exc)
         if _KEEP_SANDBOX:
-            print(f"Keeping sandbox {sandbox_name} (set SMOKE_KEEP_SANDBOX=0 to delete)")
+            print(
+                f"Keeping sandbox {sandbox_name} (set SMOKE_KEEP_SANDBOX=0 to delete)"
+            )
         else:
             try:
                 sandbox_client.delete_sandbox(sandbox_name)

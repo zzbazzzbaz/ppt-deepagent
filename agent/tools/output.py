@@ -1,3 +1,5 @@
+"""save_output：校验全部 PPTX 后发布，并返回每个文件的下载链接。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -11,64 +13,14 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.tools import tool
 from langchain_core.tools import BaseTool, ToolException
 
+from agent.infra import (
+    S3Client,
+    create_s3_client,
+    delete_object,
+    put_object_body,
+)
 from agent.settings import minio_settings
-from agent.storage import S3Client, create_s3_client, delete_object, put_object_body
-
-_REMOTE_WORK = PurePosixPath("/workspace/work")
-
-
-async def _collect_pptx_files(
-    backend: SandboxBackendProtocol,
-) -> list[PurePosixPath]:
-    result = await backend.aglob("**/*", str(_REMOTE_WORK))
-    if result.error is not None:
-        raise ToolException(f"Failed to list remote work directory: {result.error}")
-    if result.truncated:
-        raise ToolException("Remote work directory listing was truncated.")
-
-    pptx_files: list[PurePosixPath] = []
-    folded_paths: set[str] = set()
-    for entry in result.matches or []:
-        if entry.get("is_dir", False):
-            continue
-        listed_path = PurePosixPath(entry["path"])
-        remote_path = (
-            listed_path
-            if listed_path.is_absolute()
-            else _REMOTE_WORK.joinpath(listed_path)
-        )
-        try:
-            relative_path = remote_path.relative_to(_REMOTE_WORK)
-        except ValueError as exc:
-            raise ToolException(f"Remote path is outside work directory: {remote_path}") from exc
-        if not relative_path.parts or any(part in {"", ".", ".."} for part in relative_path.parts):
-            raise ToolException(f"Invalid remote work path: {remote_path}")
-
-        if relative_path.suffix.lower() != ".pptx":
-            continue
-        folded_path = relative_path.as_posix().casefold()
-        if folded_path in folded_paths:
-            raise ToolException(f"Conflicting remote work path: {remote_path}")
-        folded_paths.add(folded_path)
-        pptx_files.append(relative_path)
-
-    return sorted(pptx_files)
-
-
-async def _reject_remote_symlinks(backend: SandboxBackendProtocol) -> None:
-    result = await backend.aexecute("find /workspace/work -type l -print -quit")
-    if result.exit_code != 0:
-        raise ToolException(f"Failed to inspect remote work directory: {result.output}")
-    if result.output.strip():
-        raise ToolException(f"Remote work directory contains a symbolic link: {result.output}")
-
-
-async def _run_remote_command(
-    backend: SandboxBackendProtocol, command: str, label: str
-) -> None:
-    result = await backend.aexecute(command)
-    if result.exit_code != 0:
-        raise ToolException(f"{label} failed: {result.output}")
+from agent.tools._workspace import REMOTE_WORK, list_work_files, reject_work_symlinks
 
 
 async def _validate_pptx_files(
@@ -76,11 +28,11 @@ async def _validate_pptx_files(
     pptx_paths: list[str],
 ) -> None:
     for remote_path in pptx_paths:
-        await _run_remote_command(
-            backend,
-            "python /skills/pptx/scripts/office/validate.py " + shlex.quote(remote_path),
-            f"PPTX validation for {remote_path}",
+        result = await backend.aexecute(
+            "python /skills/pptx/scripts/office/validate.py " + shlex.quote(remote_path)
         )
+        if result.exit_code != 0:
+            raise ToolException(f"PPTX 校验失败（{remote_path}）：{result.output}")
 
 
 def _timestamp(now: datetime) -> str:
@@ -104,7 +56,12 @@ def _public_url(
     relative_path: PurePosixPath,
 ) -> str:
     quoted_key = "/".join(
-        ("threads", thread_id, timestamp, *(quote(part) for part in relative_path.parts))
+        (
+            "threads",
+            thread_id,
+            timestamp,
+            *(quote(part) for part in relative_path.parts),
+        )
     )
     return f"{public_base_url.rstrip('/')}/{quoted_key}"
 
@@ -113,7 +70,7 @@ async def _download_work_files(
     backend: SandboxBackendProtocol,
     pptx_files: list[PurePosixPath],
 ) -> dict[PurePosixPath, bytes]:
-    remote_paths = [str(_REMOTE_WORK.joinpath(path)) for path in pptx_files]
+    remote_paths = [str(REMOTE_WORK.joinpath(path)) for path in pptx_files]
     responses = await backend.adownload_files(remote_paths)
     failures = [
         f"{response.path}: {response.error or 'empty_content'}"
@@ -151,9 +108,7 @@ async def _upload_pptx_files(
                 await asyncio.to_thread(delete_object, client, bucket, key)
             except Exception:
                 pass
-        raise ToolException(
-            f"上传 PPTX 到 MinIO 失败：{type(exc).__name__}: {exc}"
-        ) from exc
+        raise ToolException(f"发布 PPTX 失败：{type(exc).__name__}: {exc}") from exc
 
 
 def create_save_output_tool(
@@ -176,18 +131,18 @@ def create_save_output_tool(
     @tool(
         "save_output",
         description=(
-            "校验 /workspace/work/ 中全部 PPTX，上传到 MinIO threads/<thread_id>/<时间戳>/ 目录，"
-            "并返回每个文件的公网下载链接。"
+            "完成最终检查并发布演示文稿：校验工作目录中的全部 PPTX 文件，"
+            "通过后发布，并返回每个文件的下载链接。"
         ),
     )
     async def save_output() -> str:
-        pptx_files = await _collect_pptx_files(backend)
+        pptx_files = await list_work_files(backend, only_suffixes={".pptx"})
         if not pptx_files:
-            raise ToolException("Remote work directory does not contain a PPTX file.")
+            raise ToolException("工作目录中没有任何 PPTX 文件。")
 
-        await _reject_remote_symlinks(backend)
+        await reject_work_symlinks(backend)
         await _validate_pptx_files(
-            backend, [str(_REMOTE_WORK.joinpath(path)) for path in pptx_files]
+            backend, [str(REMOTE_WORK.joinpath(path)) for path in pptx_files]
         )
         contents = await _download_work_files(backend, pptx_files)
 
@@ -200,9 +155,7 @@ def create_save_output_tool(
             _public_url(base_url, thread_id, timestamp, relative_path)
             for relative_path in sorted(contents)
         ]
-        lines = [
-            f"已上传 {len(urls)} 个 PPTX 到 threads/{thread_id}/{timestamp}/："
-        ]
+        lines = [f"已发布 {len(urls)} 个 PPTX，下载链接如下："]
         lines.extend(f"- {url}" for url in urls)
         return "\n".join(lines)
 

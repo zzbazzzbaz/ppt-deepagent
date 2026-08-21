@@ -13,7 +13,7 @@ from deepagents.backends.protocol import BackendProtocol, FileDownloadResponse
 from langchain_core.messages import ToolMessage
 from langchain_core.tracers.langchain import wait_for_all_tracers
 
-from agent.model import qwen_model
+from agent.infra import qwen_model
 from agent.settings import langsmith_settings
 from agent.tools.view import create_view_tool
 
@@ -29,10 +29,7 @@ _VISUAL_FEATURES = (
 def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
     checksum = binascii.crc32(chunk_type + data) & 0xFFFFFFFF
     return (
-        struct.pack(">I", len(data))
-        + chunk_type
-        + data
-        + struct.pack(">I", checksum)
+        struct.pack(">I", len(data)) + chunk_type + data + struct.pack(">I", checksum)
     )
 
 
@@ -82,8 +79,7 @@ def _assert_visual_report(report: str) -> None:
     ]
     if missing:
         raise RuntimeError(
-            "qwen3.6-flash 未识别测试图片的关键视觉特征："
-            + ", ".join(missing)
+            "qwen3.6-flash 未识别测试图片的关键视觉特征：" + ", ".join(missing)
         )
 
 

@@ -22,7 +22,9 @@ def test_workflow_build_context_bundles_the_pptx_skill() -> None:
     """Catches an image built without the baked-in PPTX skill."""
     text = WORKFLOW.read_text()
     assert "cp -R agent/skills/pptx /tmp/sandbox-context/agent/skills/pptx" in text
-    assert "COPY agent/skills/pptx /skills/pptx" in Path("sandbox/Dockerfile").read_text()
+    assert (
+        "COPY agent/skills/pptx /skills/pptx" in Path("sandbox/Dockerfile").read_text()
+    )
 
 
 def test_workflow_serializes_latest_snapshot_updates() -> None:

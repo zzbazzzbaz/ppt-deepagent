@@ -1,3 +1,5 @@
+"""submit_outline：提交完整逐页大纲，触发人工审批中断。"""
+
 from __future__ import annotations
 
 from typing import Annotated
@@ -11,24 +13,24 @@ class SlideOutline(BaseModel):
 
     index: int = Field(
         ge=1,
-        description="页面编号",
+        description="页面编号，从 1 开始连续递增。",
     )
     title: str = Field(
         min_length=1,
-        description="当前页面的标题，应表达该页的核心信息。",
+        description="本页短标题，概括该页要传达的核心信息。",
     )
     key_points: list[
         Annotated[str, Field(min_length=1, description="一条独立的页面要点。")]
     ] = Field(
         min_length=2,
         max_length=5,
-        description="当前页面的 2-5 条原子化事实、观点或结论，每条只表达一个要点。",
+        description="本页 2-5 条原子化要点：事实、观点或结论，每条只表达一个要点。",
     )
     markdown: str = Field(
         min_length=1,
         description=(
-            "当前页面的 Markdown 内容草稿，可使用段落、列表、引用或表格；"
-            "不要包含 HTML、PPTX XML、布局代码或纯演讲稿填充内容。"
+            "本页内容的 Markdown 草稿，可使用段落、列表、引用或表格，"
+            "作为后续制作的素材；只写内容本身，不包含代码、格式指令或占位文字。"
         ),
     )
 
@@ -38,18 +40,18 @@ class OutlineSubmission(BaseModel):
 
     title: str = Field(
         min_length=1,
-        description="标题",
+        description="演示文稿标题。",
     )
     markdown: str = Field(
         min_length=1,
         description=(
-            "整套大纲的人类可读 Markdown 视图，应概括总体叙事、页面顺序和每页摘要，"
-            "不包含 PPTX 实现细节。"
+            "整套大纲的 Markdown 摘要，概括总体叙事、页面顺序和每页要点，"
+            "供人工快速审阅；只描述内容与结构。"
         ),
     )
     slides: list[SlideOutline] = Field(
         min_length=1,
-        description="按页面顺序排列的结构化大纲，至少包含一页。",
+        description="按播放顺序排列的逐页大纲，至少包含一页。",
     )
 
     @model_validator(mode="after")
@@ -61,10 +63,17 @@ class OutlineSubmission(BaseModel):
         return self
 
 
-@tool(args_schema=OutlineSubmission, description="提交完整的逐页演示大纲，等待人工审批")
+@tool(
+    args_schema=OutlineSubmission,
+    description=(
+        "提交完整的逐页大纲供人工审批。调用后流程会暂停，等待人工批准"
+        "（approve）、修改（edit）或驳回（reject）；只有批准后才可开始生成演示文稿。"
+    ),
+)
 def submit_outline(
     title: str,
     markdown: str,
     slides: list[SlideOutline],
 ) -> str:
+    """返回审批通过信号，供系统提示词判断进入生成阶段。"""
     return "大纲已批准，可以开始生成演示文稿。"

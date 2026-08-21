@@ -38,7 +38,7 @@ THREAD_ID = "4ef6e832-7c8d-4d15-9b28-0547bf2090b0"
 @pytest.fixture(scope="module", autouse=True)
 def _load_sandbox_module_with_test_env() -> None:
     with patch.dict(os.environ, _TEST_ENV, clear=False):
-        importlib.import_module("agent.sandbox")
+        importlib.import_module("agent.infra.sandbox")
 
 
 @pytest.fixture
@@ -52,7 +52,7 @@ def client() -> Mock:
 
 @pytest.fixture(autouse=True)
 def sandbox_settings_stub() -> None:
-    sandbox_module = importlib.import_module("agent.sandbox")
+    sandbox_module = importlib.import_module("agent.infra.sandbox")
     settings_patch = patch.object(
         sandbox_module,
         "sandbox_settings",
@@ -71,7 +71,7 @@ def sandbox_settings_stub() -> None:
 
 def test_creates_thread_sandbox_from_configured_snapshot(client: Mock) -> None:
     """Catches new Thread Sandboxes silently using LangSmith's default image."""
-    sandbox_module = importlib.import_module("agent.sandbox")
+    sandbox_module = importlib.import_module("agent.infra.sandbox")
     client.get_sandbox.side_effect = ResourceNotFoundError("missing")
     created = SimpleNamespace(
         name=sandbox_module.sandbox_name_for_thread(THREAD_ID),
@@ -94,7 +94,7 @@ def test_creates_thread_sandbox_from_configured_snapshot(client: Mock) -> None:
 
 def test_creates_thread_sandbox_without_mount_config(client: Mock) -> None:
     """Catches a Sandbox still requesting S3 mounts that no longer exist."""
-    sandbox_module = importlib.import_module("agent.sandbox")
+    sandbox_module = importlib.import_module("agent.infra.sandbox")
     client.get_sandbox.side_effect = ResourceNotFoundError("missing")
     client.create_sandbox.return_value = SimpleNamespace(
         name=sandbox_module.sandbox_name_for_thread(THREAD_ID),
@@ -113,7 +113,7 @@ def test_rejects_existing_thread_sandbox_from_different_snapshot(
     client: Mock,
 ) -> None:
     """Catches reusing an older Sandbox that lacks the PPTX toolchain."""
-    sandbox_module = importlib.import_module("agent.sandbox")
+    sandbox_module = importlib.import_module("agent.infra.sandbox")
     client.get_sandbox.return_value = SimpleNamespace(
         name=sandbox_module.sandbox_name_for_thread(THREAD_ID),
         status="ready",

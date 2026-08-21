@@ -14,7 +14,7 @@ from deepagents.backends.langsmith import LangSmithSandbox
 from langsmith.sandbox import SandboxClient, SandboxClientError, Snapshot
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from agent.snapshot import find_ready_snapshot
+from agent.infra import find_ready_snapshot
 
 _BUILD_ASSETS = (
     "Dockerfile",
@@ -67,7 +67,11 @@ def prepare_build_context(project_root: Path, destination: Path) -> None:
     skill_src = project_root / "agent" / "skills" / "pptx"
     skill_dst = destination / "agent" / "skills" / "pptx"
     skill_dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(skill_src, skill_dst, ignore=shutil.ignore_patterns("*__pycache__", "*.pyc", ".DS_Store"))
+    shutil.copytree(
+        skill_src,
+        skill_dst,
+        ignore=shutil.ignore_patterns("*__pycache__", "*.pyc", ".DS_Store"),
+    )
 
 
 def _delete_failed_snapshots(client: SandboxClient, name: str) -> None:
@@ -137,7 +141,9 @@ def _require_success(output: object, label: str) -> None:
         raise RuntimeError(f"{label} failed: {result}")
 
 
-def _run_commands(backend: LangSmithSandbox, commands: Iterable[tuple[str, str]]) -> None:
+def _run_commands(
+    backend: LangSmithSandbox, commands: Iterable[tuple[str, str]]
+) -> None:
     for label, command in commands:
         _require_success(backend.execute(command), label)
 
@@ -276,9 +282,7 @@ def sync_snapshot_from_image(
         client.delete_snapshot(candidate.id)
         raise
     client.delete_snapshot(candidate.id)
-    return SnapshotSyncResult(
-        "updated" if existing is not None else "created", latest
-    )
+    return SnapshotSyncResult("updated" if existing is not None else "created", latest)
 
 
 def main() -> None:
@@ -307,7 +311,9 @@ def main() -> None:
     try:
         if args.command == "build":
             snapshot = build_snapshot(client, args.name, _project_root())
-            print(f"Snapshot created: {snapshot.name} ({snapshot.id}) [{snapshot.status}]")
+            print(
+                f"Snapshot created: {snapshot.name} ({snapshot.id}) [{snapshot.status}]"
+            )
         elif args.command == "from-image":
             if not args.docker_image:
                 parser.error("--docker-image is required for from-image")

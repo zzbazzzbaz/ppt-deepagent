@@ -8,7 +8,7 @@ from langgraph_sdk import get_client
 from langgraph_sdk.schema import Command
 from langsmith.sandbox import ResourceNotFoundError, SandboxClient
 
-from agent.sandbox import sandbox_name_for_thread
+from agent.infra import sandbox_name_for_thread
 from agent.settings import langsmith_settings
 
 AGENT_SERVER_URL = os.getenv("AGENT_SERVER_URL", "http://127.0.0.1:2024")

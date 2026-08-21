@@ -142,7 +142,7 @@ async def test_download_syncs_minio_input_to_sandbox() -> None:
         ]
     ]
     assert "已同步 2 个文件" in result
-    assert f"MinIO threads/{THREAD_ID}/input/ -> /workspace/input/" in result
+    assert "用户素材 -> /workspace/input/" in result
     assert "- brief.md" in result
     assert "- assets/logo.png" in result
 
@@ -164,9 +164,7 @@ async def test_download_rejects_unsafe_object_key() -> None:
     """Catches an object key escaping the sandbox input directory."""
     backend = FakeBackend()
     s3_client = FakeS3Client(
-        pages=[
-            {"Contents": [{"Key": f"threads/{THREAD_ID}/input/../evil.md"}]}
-        ],
+        pages=[{"Contents": [{"Key": f"threads/{THREAD_ID}/input/../evil.md"}]}],
         objects={f"threads/{THREAD_ID}/input/../evil.md": b"evil"},
     )
     tool = create_sync_tool(
@@ -204,7 +202,7 @@ async def test_download_reports_failed_sandbox_write() -> None:
 
     assert isinstance(result, ToolMessage)
     assert result.status == "error"
-    assert "写入 Sandbox 失败" in result.text
+    assert "写入工作环境失败" in result.text
 
 
 async def test_upload_syncs_sandbox_work_to_minio() -> None:
@@ -242,7 +240,7 @@ async def test_upload_syncs_sandbox_work_to_minio() -> None:
         },
     ]
     assert "已同步 2 个文件" in result
-    assert f"/workspace/work/ -> MinIO threads/{THREAD_ID}/work/" in result
+    assert "工作产物 -> 云端存档" in result
 
 
 async def test_upload_with_empty_work_directory_syncs_nothing() -> None:
@@ -261,9 +259,7 @@ async def test_upload_with_empty_work_directory_syncs_nothing() -> None:
 
 async def test_upload_rejects_work_directory_with_symlink() -> None:
     """Catches following a symbolic link out of the sandbox work directory."""
-    backend = FakeBackend(
-        matches=[{"path": "deck.pptx", "is_dir": False, "size": 10}]
-    )
+    backend = FakeBackend(matches=[{"path": "deck.pptx", "is_dir": False, "size": 10}])
     backend.command_responses = [
         SimpleNamespace(output="/workspace/work/evil", exit_code=0, truncated=False)
     ]
@@ -314,7 +310,7 @@ async def test_upload_rejects_failed_sandbox_download() -> None:
 
     assert isinstance(result, ToolMessage)
     assert result.status == "error"
-    assert "读取 Sandbox 文件失败" in result.text
+    assert "读取工作环境文件失败" in result.text
     assert s3_client.put_calls == []
 
 

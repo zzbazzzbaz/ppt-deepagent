@@ -31,8 +31,13 @@ def test_dockerfile_uses_pinned_node_22_runtime() -> None:
         "d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 "
         "AS node-runtime"
     ) in dockerfile
-    assert "COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node" in dockerfile
-    assert "COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules" in dockerfile
+    assert (
+        "COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node" in dockerfile
+    )
+    assert (
+        "COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules"
+        in dockerfile
+    )
     assert "\n    nodejs \\" not in dockerfile
     assert "\n    npm \\" not in dockerfile
     assert "npm ci --omit=dev --ignore-scripts" in dockerfile

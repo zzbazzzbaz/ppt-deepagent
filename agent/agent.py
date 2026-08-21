@@ -6,14 +6,19 @@ from deepagents import create_deep_agent
 from langchain.agents.middleware import InterruptOnConfig
 from langchain_core.runnables import RunnableConfig
 
-from agent.model import deepseek_model, qwen_model
+from agent.infra import (
+    create_s3_client,
+    deepseek_model,
+    get_thread_sandbox_backend,
+    qwen_model,
+)
 from agent.prompts.presentation_planner import PRESENTATION_PLANNER_SYSTEM_PROMPT
-from agent.sandbox import get_thread_sandbox_backend
-from agent.storage import create_s3_client
-from agent.tools.outline import submit_outline
-from agent.tools.output import create_save_output_tool
-from agent.tools.sync import create_sync_tool
-from agent.tools.view import create_view_tool
+from agent.tools import (
+    create_save_output_tool,
+    create_sync_tool,
+    create_view_tool,
+    submit_outline,
+)
 
 _OUTLINE_INTERRUPT_CONFIG: InterruptOnConfig = {
     "allowed_decisions": ["approve", "edit", "reject"],

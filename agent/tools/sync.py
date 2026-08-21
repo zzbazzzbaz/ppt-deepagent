@@ -1,3 +1,5 @@
+"""sync：在工作环境与云端之间同步文件（用户素材 / 工作产物）。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -9,16 +11,16 @@ from langchain.tools import tool
 from langchain_core.tools import BaseTool, ToolException
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent.settings import minio_settings
-from agent.storage import (
+from agent.infra import (
     S3Client,
     create_s3_client,
     get_object_body,
     list_object_keys,
     put_object_body,
 )
+from agent.settings import minio_settings
+from agent.tools._workspace import REMOTE_WORK, list_work_files, reject_work_symlinks
 
-_REMOTE_WORK = PurePosixPath("/workspace/work")
 _REMOTE_INPUT = PurePosixPath("/workspace/input")
 
 
@@ -27,60 +29,22 @@ class SyncInput(BaseModel):
 
     direction: Literal["download", "upload"] = Field(
         description=(
-            "同步方向：download 把 MinIO threads/<thread_id>/input 同步到 Sandbox "
-            "/workspace/input；upload 把 Sandbox /workspace/work 同步到 MinIO "
-            "threads/<thread_id>/work。同名文件直接覆盖。"
+            "同步方向：download 把用户上传的素材拉取到 /workspace/input/，"
+            "在开始制作前调用；upload 把工作产物（生成脚本、渲染图、检查报告等）"
+            "从 /workspace/work/ 回传到云端存档，在发布后调用。同名文件直接覆盖。"
         ),
     )
 
 
 def _safe_relative_path(suffix: str) -> PurePosixPath:
     path = PurePosixPath(suffix)
-    if path.is_absolute() or not path.parts or any(
-        part in {"", ".", ".."} for part in path.parts
+    if (
+        path.is_absolute()
+        or not path.parts
+        or any(part in {"", ".", ".."} for part in path.parts)
     ):
         raise ToolException(f"不安全的对象存储路径：{suffix}")
     return path
-
-
-async def _collect_work_files(
-    backend: SandboxBackendProtocol,
-) -> list[PurePosixPath]:
-    result = await backend.aglob("**/*", str(_REMOTE_WORK))
-    if result.error is not None:
-        raise ToolException(f"列出 Sandbox 工作目录失败：{result.error}")
-    if result.truncated:
-        raise ToolException("Sandbox 工作目录列表被截断。")
-
-    files: list[PurePosixPath] = []
-    for entry in result.matches or []:
-        if entry.get("is_dir", False):
-            continue
-        listed_path = PurePosixPath(entry["path"])
-        remote_path = (
-            listed_path
-            if listed_path.is_absolute()
-            else _REMOTE_WORK.joinpath(listed_path)
-        )
-        try:
-            relative_path = remote_path.relative_to(_REMOTE_WORK)
-        except ValueError as exc:
-            raise ToolException(f"路径超出工作目录：{remote_path}") from exc
-        if not relative_path.parts or any(
-            part in {"", ".", ".."} for part in relative_path.parts
-        ):
-            raise ToolException(f"无效的工作目录路径：{remote_path}")
-        files.append(relative_path)
-
-    return sorted(files)
-
-
-async def _reject_remote_symlinks(backend: SandboxBackendProtocol) -> None:
-    result = await backend.aexecute("find /workspace/work -type l -print -quit")
-    if result.exit_code != 0:
-        raise ToolException(f"检查 Sandbox 工作目录失败：{result.output}")
-    if result.output.strip():
-        raise ToolException(f"Sandbox 工作目录包含符号链接：{result.output}")
 
 
 async def _download_from_minio(
@@ -92,9 +56,7 @@ async def _download_from_minio(
     try:
         keys = await asyncio.to_thread(list_object_keys, client, bucket, prefix)
     except Exception as exc:
-        raise ToolException(
-            f"列出 MinIO 对象失败：{type(exc).__name__}: {exc}"
-        ) from exc
+        raise ToolException(f"列出云端对象失败：{type(exc).__name__}: {exc}") from exc
 
     files: list[tuple[str, bytes]] = []
     relative_paths: list[PurePosixPath] = []
@@ -106,7 +68,7 @@ async def _download_from_minio(
             body = await asyncio.to_thread(get_object_body, client, bucket, key)
         except Exception as exc:
             raise ToolException(
-                f"读取 MinIO 对象失败：{key} ({type(exc).__name__}: {exc})"
+                f"读取云端对象失败：{key} ({type(exc).__name__}: {exc})"
             ) from exc
         relative_paths.append(relative_path)
         files.append((str(_REMOTE_INPUT / relative_path), body))
@@ -119,7 +81,7 @@ async def _download_from_minio(
             if response.error is not None
         ]
         if failures:
-            raise ToolException("写入 Sandbox 失败：" + "; ".join(failures))
+            raise ToolException("写入工作环境失败：" + "; ".join(failures))
     return relative_paths
 
 
@@ -129,12 +91,12 @@ async def _upload_to_minio(
     bucket: str,
     prefix: str,
 ) -> list[PurePosixPath]:
-    await _reject_remote_symlinks(backend)
-    relative_paths = await _collect_work_files(backend)
+    await reject_work_symlinks(backend)
+    relative_paths = await list_work_files(backend)
     if not relative_paths:
         return []
 
-    remote_paths = [str(_REMOTE_WORK / path) for path in relative_paths]
+    remote_paths = [str(REMOTE_WORK / path) for path in relative_paths]
     responses = await backend.adownload_files(remote_paths)
     failures = [
         f"{response.path}: {response.error or 'empty_content'}"
@@ -142,7 +104,7 @@ async def _upload_to_minio(
         if response.error is not None or response.content is None
     ]
     if failures:
-        raise ToolException("读取 Sandbox 文件失败：" + "; ".join(failures))
+        raise ToolException("读取工作环境文件失败：" + "; ".join(failures))
 
     for relative_path, response in zip(relative_paths, responses, strict=True):
         assert response.content is not None
@@ -153,7 +115,7 @@ async def _upload_to_minio(
             )
         except Exception as exc:
             raise ToolException(
-                f"上传到 MinIO 失败：{key} ({type(exc).__name__}: {exc})"
+                f"上传到云端失败：{key} ({type(exc).__name__}: {exc})"
             ) from exc
     return relative_paths
 
@@ -174,21 +136,24 @@ def create_sync_tool(
         "sync",
         args_schema=SyncInput,
         description=(
-            "同步 MinIO 与 Sandbox 之间的文件，同名文件直接覆盖："
-            "direction=download 时把 MinIO threads/<thread_id>/input/ 同步到 "
-            "/workspace/input/；direction=upload 时把 /workspace/work/ 同步到 "
-            "MinIO threads/<thread_id>/work/。"
+            "在工作环境与云端之间同步文件，同名文件直接覆盖。"
+            "开始时用 download 拉取用户素材；结束时用 upload 回传工作产物，"
+            "便于后续会话继续。"
         ),
     )
     async def sync(direction: Literal["download", "upload"]) -> str:
         if direction == "download":
-            synced = await _download_from_minio(backend, client, resolved_bucket, input_prefix)
-            source = f"MinIO {input_prefix}"
+            synced = await _download_from_minio(
+                backend, client, resolved_bucket, input_prefix
+            )
+            source = "用户素材"
             target = f"{_REMOTE_INPUT}/"
         else:
-            synced = await _upload_to_minio(backend, client, resolved_bucket, work_prefix)
-            source = f"{_REMOTE_WORK}/"
-            target = f"MinIO {work_prefix}"
+            synced = await _upload_to_minio(
+                backend, client, resolved_bucket, work_prefix
+            )
+            source = "工作产物"
+            target = "云端存档"
 
         lines = [f"已同步 {len(synced)} 个文件（{source} -> {target}，同名覆盖）："]
         lines.extend(f"- {path.as_posix()}" for path in synced)

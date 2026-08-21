@@ -45,11 +45,9 @@ class MinioSettings(BaseSettings):
 
     endpoint_url: str
     bucket: str
-    region: str = "us-east-1"
-    path_style: bool = True
-    public_base_url: str = Field(
-        description="Object store root URL that already includes the bucket."
-    )
+    region: str
+    path_style: bool
+    public_base_url: str
     access_key: str
     secret_key: str
 
@@ -59,15 +57,9 @@ class SandboxSettings(BaseSettings):
         env_file=".env", env_prefix="SANDBOX_", extra="ignore"
     )
 
-    name_prefix: str = Field(
-        pattern=r"^[a-z0-9][a-z0-9-]*$",
-    )
+    name_prefix: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
     snapshot_name: str = Field(min_length=1)
-    mem_bytes: int = Field(
-        default=2 * 1024**3,
-        ge=2 * 1024**3,
-        le=2 * 1024**3,
-    )
+    mem_bytes: int = Field(ge=2 * 1024**3, le=2 * 1024**3)
     idle_ttl_seconds: int = Field(ge=0, multiple_of=60)
     delete_after_stop_seconds: int = Field(ge=0, multiple_of=60)
 

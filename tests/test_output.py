@@ -108,7 +108,7 @@ async def test_rejects_truncated_work_listing() -> None:
 
     assert isinstance(result, ToolMessage)
     assert result.status == "error"
-    assert "truncated" in result.text
+    assert "截断" in result.text
     assert backend.commands == []
 
 
@@ -130,7 +130,7 @@ async def test_rejects_conflicting_case_folded_pptx_paths() -> None:
 
     assert isinstance(result, ToolMessage)
     assert result.status == "error"
-    assert "Conflicting" in result.text
+    assert "大小写" in result.text
     assert backend.commands == []
 
 
@@ -154,7 +154,7 @@ async def test_validation_failure_uploads_nothing() -> None:
 
     assert isinstance(result, ToolMessage)
     assert result.status == "error"
-    assert "PPTX validation" in result.text
+    assert "校验失败" in result.text
     assert "invalid" in result.text
     assert s3_client.put_calls == []
 
@@ -178,7 +178,7 @@ async def test_rejects_work_directory_with_symlink() -> None:
 
     assert isinstance(result, ToolMessage)
     assert result.status == "error"
-    assert "symbolic link" in result.text
+    assert "符号链接" in result.text
     assert s3_client.put_calls == []
 
 
@@ -267,7 +267,7 @@ async def test_uploads_all_pptx_and_returns_public_urls() -> None:
     )
     assert f"{url_base}/final/deck.pptx" in result
     assert f"{url_base}/archive/old%20deck.pptx" in result
-    assert f"已上传 2 个 PPTX 到 threads/{THREAD_ID}/{TIMESTAMP}/：" in result
+    assert "已发布 2 个 PPTX，下载链接如下：" in result
 
 
 async def test_upload_failure_cleans_up_uploaded_objects() -> None:
@@ -297,7 +297,7 @@ async def test_upload_failure_cleans_up_uploaded_objects() -> None:
 
     assert isinstance(result, ToolMessage)
     assert result.status == "error"
-    assert "上传 PPTX 到 MinIO 失败" in result.text
+    assert "发布 PPTX 失败" in result.text
     assert s3_client.deleted_keys == [f"threads/{THREAD_ID}/{TIMESTAMP}/a.pptx"]
 
 
